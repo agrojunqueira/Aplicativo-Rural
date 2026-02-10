@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Aplicativo Rural — MVP</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    .app{display:flex;height:100vh;overflow:hidden;}
+    .side{width:360px;max-width:92vw;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;}
+    .brand{padding:14px 14px 10px;border-bottom:1px solid #e5e7eb;}
+    .brand h1{margin:0;font-size:16px;}
+    .brand .sub{margin:6px 0 0;color:#6b7280;font-size:12px;line-height:1.3;}
+    .controls{padding:10px 14px;border-bottom:1px solid #e5e7eb;}
+    select,input,button{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;}
+    button{cursor:pointer;background:#111827;color:#fff;border:none;border-radius:10px;}
+    button.secondary{background:#f3f4f6;color:#111827;border:1px solid #e5e7eb;}
+    .row{display:flex;gap:10px;}
+    .row > *{flex:1;}
+    .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#f3f4f6;margin:2px;font-size:12px;}
+    .small{font-size:12px;color:#6b7280;}
+    .occ{border-top:1px dashed #e5e7eb;margin-top:10px;padding-top:10px;}
+    .occ-item{border:1px solid #e5e7eb;border-radius:12px;padding:10px;margin-top:8px;}
+
+    .thumbs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;}
+    .thumb{width:54px;height:54px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;cursor:pointer;}
+    .thumb-more{width:54px;height:54px;border-radius:10px;border:1px dashed #9ca3af;display:flex;align-items:center;justify-content:center;font-weight:700;color:#111827;cursor:pointer;background:#f9fafb;}
+
+    .occ-head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;}
+    .badge{font-size:12px;padding:4px 8px;border-radius:999px;background:#111827;color:#fff;}
+    .badge.gray{background:#6b7280;}
+    .badge.orange{background:#b45309;}
+    .badge.green{background:#047857;}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;padding:16px;z-index:9999;}
+    .modal{background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:92vh;overflow:auto;border:1px solid #e5e7eb;}
+    .modal header{padding:14px 16px;border-bottom:1px solid #e5e7eb;}
+    .modal main{padding:16px;}
+    .modal footer{padding:14px 16px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;}
+    textarea{width:100%;min-height:90px;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;}
+    label{font-size:12px;color:#374151;font-weight:600;display:block;margin:10px 0 6px;}
+    .panel{padding:14px;overflow:auto;flex:1;}
+    .card{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin-bottom:12px;}
+    .topline{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
+    .pill{font-size:12px;background:#f3f4f6;border-radius:999px;padding:6px 10px;color:#111827;}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;}
+    .k{color:#6b7280;font-size:11px;margin-bottom:2px;}
+    .v{font-weight:600;font-size:14px;color:#111827}
+    .muted{color:#6b7280;font-size:12px}
+    #map{flex:1}
+    @media (max-width: 860px){
+      .app{flex-direction:column;}
+      .side{width:100%;height:44vh}
+      #map{height:56vh}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="side">
+      <div class="brand">
+        <h1>Aplicativo Rural — MVP (Mapa + Talhão)</h1>
+        <div class="sub">MVP: mapa + seleção por talhão/fazenda + ocorrências (local). Offline/sincronização e relatórios completos entram na próxima fase.</div>
+      </div>
+      
+      <div class="controls">
+        <div style="display:flex;gap:10px;margin-bottom:10px;">
+          <select id="profileSelect" style="flex:1">
+            <option value="user">Perfil: Usuário</option>
+            <option value="master">Perfil: Master</option>
+          </select>
+          <select id="modeSelect" style="flex:1">
+            <option value="talhao">Modo: Talhão</option>
+            <option value="fazenda">Modo: Fazenda</option>
+          </select>
+        </div>
+        <select id="farmSelect">
+          <option value="">Carregando fazendas…</option>
+        </select>
+      </div>
+
+      <div class="panel">
+        <div class="card" id="infoCard">
+          <div class="muted">Selecione uma fazenda e clique em um talhão.</div>
+        </div>
+        <div class="card">
+          <div class="muted"><b>Obs:</b> “COD” aqui usa o identificador único do KML (campo <i>LAYER</i>). Produção 2025 é cruzada por <i>PROPRIEAD_TALHAO</i>.</div>
+        </div>
+      </div>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@tmcw/togeojson@5.6.2/dist/togeojson.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal">
+      <header>
+        <div id="modalTitle" style="font-weight:700;">Nova ocorrência</div>
+        <div class="small" id="modalSub"></div>
+      </header>
+      <main id="modalBody"></main>
+      <footer>
+        <button class="secondary" id="modalCancel">Cancelar</button>
+        <button id="modalSave">Salvar</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
