@@ -7,13 +7,15 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
   <style>
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    html, body { height: 100%; }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
+
     .app{display:flex;height:100vh;}
 
     /* ====== SIDEBAR (desktop) ====== */
     .side{
       width:360px; min-width:320px; max-width:420px;
-      overflow-y:auto; background:#fff; z-index:1000;
+      overflow-y:auto; background:#fff; z-index:2000;
       border-right:1px solid #e5e7eb;
     }
 
@@ -34,7 +36,7 @@
     .row > *{flex:1;}
 
     /* ====== MAPA ====== */
-    #map{flex:1;height:100vh;}
+    #map{flex:1;height:100vh; min-height: 0;} /* min-height 0 ajuda no iOS */
 
     /* ====== MODAL ====== */
     .modal-backdrop{
@@ -55,7 +57,7 @@
     #fabAdd{
       display:none; /* só aparece no mobile */
       position:fixed;
-      left:18px; bottom:18px;
+      left:18px; bottom:88px; /* sobe um pouco pra não brigar com a barra do Safari */
       width:64px; height:64px;
       border-radius:999px;
       border:none;
@@ -63,12 +65,14 @@
       font-weight:800;
       background:#111827;
       color:#fff;
-      z-index:5000;
+      z-index:7000;
       box-shadow:0 12px 30px rgba(0,0,0,.25);
     }
 
-    /* ====== MOBILE (o que você quer) ====== */
+    /* ====== MOBILE (sidebar fixa em cima + mapa embaixo + botão +) ====== */
     @media (max-width: 900px){
+      body{ overflow:hidden; }
+
       .app{
         flex-direction:column;
         height:100vh;
@@ -80,15 +84,18 @@
         min-width:0;
         position:sticky;
         top:0;
-        z-index:2000;
+        z-index:5000;
         border-right:none;
         border-bottom:1px solid #e5e7eb;
+        max-height: 46vh;         /* sidebar não pode engolir o mapa */
+        overflow-y:auto;
+        -webkit-overflow-scrolling: touch;
       }
 
-      /* mapa ocupa o resto */
       #map{
-        height:calc(100vh - 320px);
-        min-height:320px;
+        flex:1;
+        height:auto;               /* deixa o flex mandar */
+        min-height: 54vh;          /* garante espaço pro mapa */
       }
 
       #fabAdd{ display:block; }
@@ -159,13 +166,14 @@
   <script src="app.js"></script>
 
   <script>
-    // Evita mapa branco no celular (Leaflet)
-    window.addEventListener("load", () => {
-      if (window.map && map.invalidateSize) setTimeout(() => map.invalidateSize(), 300);
-    });
-    window.addEventListener("resize", () => {
-      if (window.map && map.invalidateSize) setTimeout(() => map.invalidateSize(), 200);
-    });
+    // Corrige “mapa branco” no iPhone quando abre/rola/fecha teclado etc.
+    function fixLeafletSize() {
+      const m = window.__leafletMap;
+      if (m && m.invalidateSize) setTimeout(() => m.invalidateSize(), 250);
+    }
+    window.addEventListener("load", fixLeafletSize);
+    window.addEventListener("resize", fixLeafletSize);
+    document.addEventListener("visibilitychange", fixLeafletSize);
   </script>
 </body>
 </html>
