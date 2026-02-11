@@ -1,184 +1,121 @@
 <!doctype html>
 <html lang="pt-br">
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Aplicativo Rural — MVP</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
   <style>
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
-    ..app {
-  display:flex;
-  height:100vh;
-}
-    ..side {
-  width:360px;
-  min-width:320px;
-  max-width:400px;
-  overflow-y:auto;
-  background:#fff;
-  z-index:1000;
-}
+    .app{display:flex;height:100vh;}
+
+    /* ====== SIDEBAR (desktop) ====== */
+    .side{
+      width:360px; min-width:320px; max-width:420px;
+      overflow-y:auto; background:#fff; z-index:1000;
+      border-right:1px solid #e5e7eb;
+    }
+
     .brand{padding:14px 14px 10px;border-bottom:1px solid #e5e7eb;}
     .brand h1{margin:0;font-size:16px;}
     .brand .sub{margin:6px 0 0;color:#6b7280;font-size:12px;line-height:1.3;}
+
     .controls{padding:10px 14px;border-bottom:1px solid #e5e7eb;}
-    select,input,button{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;}
+    select,input,button,textarea{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;}
     button{cursor:pointer;background:#111827;color:#fff;border:none;border-radius:10px;}
     button.secondary{background:#f3f4f6;color:#111827;border:1px solid #e5e7eb;}
+
+    .panel{padding:14px;overflow:auto;}
+    .card{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin-bottom:12px;}
+    .muted{color:#6b7280;font-size:12px}
+
     .row{display:flex;gap:10px;}
     .row > *{flex:1;}
-    .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#f3f4f6;margin:2px;font-size:12px;}
-    .small{font-size:12px;color:#6b7280;}
-    .occ{border-top:1px dashed #e5e7eb;margin-top:10px;padding-top:10px;}
-    .occ-item{border:1px solid #e5e7eb;border-radius:12px;padding:10px;margin-top:8px;}
 
-    .thumbs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;}
-    .thumb{width:54px;height:54px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;cursor:pointer;}
-    .thumb-more{width:54px;height:54px;border-radius:10px;border:1px dashed #9ca3af;display:flex;align-items:center;justify-content:center;font-weight:700;color:#111827;cursor:pointer;background:#f9fafb;}
+    /* ====== MAPA ====== */
+    #map{flex:1;height:100vh;}
 
-    .occ-head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;}
-    .badge{font-size:12px;padding:4px 8px;border-radius:999px;background:#111827;color:#fff;}
-    .badge.gray{background:#6b7280;}
-    .badge.orange{background:#b45309;}
-    .badge.green{background:#047857;}
-    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;padding:16px;z-index:9999;}
-    .modal{background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:92vh;overflow:auto;border:1px solid #e5e7eb;}
+    /* ====== MODAL ====== */
+    .modal-backdrop{
+      position:fixed; inset:0; background:rgba(0,0,0,.35);
+      display:none; align-items:center; justify-content:center;
+      padding:16px; z-index:9999;
+    }
+    .modal{
+      background:#fff; border-radius:16px; max-width:520px; width:100%;
+      max-height:92vh; overflow:auto; border:1px solid #e5e7eb;
+    }
     .modal header{padding:14px 16px;border-bottom:1px solid #e5e7eb;}
     .modal main{padding:16px;}
     .modal footer{padding:14px 16px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;}
-    textarea{width:100%;min-height:90px;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;}
     label{font-size:12px;color:#374151;font-weight:600;display:block;margin:10px 0 6px;}
-    .panel{padding:14px;overflow:auto;flex:1;}
-    .card{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin-bottom:12px;}
-    .topline{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
-    .pill{font-size:12px;background:#f3f4f6;border-radius:999px;padding:6px 10px;color:#111827;}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;}
-    .k{color:#6b7280;font-size:11px;margin-bottom:2px;}
-    .v{font-weight:600;font-size:14px;color:#111827}
-    .muted{color:#6b7280;font-size:12px}
-   #map {
-  flex:1;
-  height:100vh;
-}
-   #map{
-  height: calc(100vh - 10px);
-  width: 100%;
-}
+
+    /* ====== BOTÃO + (FAB) ====== */
+    #fabAdd{
+      display:none; /* só aparece no mobile */
+      position:fixed;
+      left:18px; bottom:18px;
+      width:64px; height:64px;
+      border-radius:999px;
+      border:none;
+      font-size:34px;
+      font-weight:800;
+      background:#111827;
+      color:#fff;
+      z-index:5000;
+      box-shadow:0 12px 30px rgba(0,0,0,.25);
     }
-/* ===== MOBILE: gaveta lateral ===== */
-.mobile-menu-btn { display: none; }
 
-@media (max-width: 820px) {
-  .mobile-menu-btn{
-    display: block;
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    z-index: 99999;
-    padding: 10px 14px;
-    border-radius: 12px;
-    border: none;
-    background: #fff;
-    font-weight: 800;
-    box-shadow: 0 6px 18px rgba(0,0,0,.22);
-  }
-.app{
-  display: flex;
-  flex-direction: row;
-  height: 100vh;
-}
+    /* ====== MOBILE (o que você quer) ====== */
+    @media (max-width: 900px){
+      .app{
+        flex-direction:column;
+        height:100vh;
+      }
 
-.side{
-  width: 38%;
-  max-width: 360px;
-  min-width: 260px;
-  overflow-y: auto;
-  padding: 10px;
-}
+      .side{
+        width:100%;
+        max-width:none;
+        min-width:0;
+        position:sticky;
+        top:0;
+        z-index:2000;
+        border-right:none;
+        border-bottom:1px solid #e5e7eb;
+      }
 
-.main{
-  flex: 1;
-  height: 100vh;
-}
-  /* sidebar vira gaveta */
-  #sidebar{
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 100dvh;
-    width: 86%;
-    max-width: 380px;
-    background: #fff;
-    z-index: 99998;
-    transform: translateX(-110%);
-    transition: transform .25s ease;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 14px;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
-  }
+      /* mapa ocupa o resto */
+      #map{
+        height:calc(100vh - 320px);
+        min-height:320px;
+      }
 
-  #sidebar.open{ transform: translateX(0); }
-
-  /* o mapa ocupa a tela */
-  #map{
-    position: fixed;
-    inset: 0;
-    z-index: 1;
-  }
-
-  /* tira “espremido” do layout desktop */
-  .app{ display:block; }
-}
-    /* ===== AJUSTE PARA CELULAR ===== */
-@media (max-width: 768px) {
-
-  .app {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .side {
-    width: 100%;
-  }
-
-  #sidebar {
-    width: 100%;
-  }
-
-  #map {
-    height: 60vh;
-    width: 100%;
-  }
-
-  h1 {
-    font-size: 18px;
-  }
-
-}
+      #fabAdd{ display:block; }
+    }
   </style>
 </head>
-<button id="btnMenu" class="mobile-menu-btn">☰ Menu</button>
+
+<body>
   <div class="app">
     <div class="side" id="sidebar">
       <div class="brand">
         <h1>Aplicativo Rural — MVP (Mapa + Talhão)</h1>
         <div class="sub">MVP: mapa + seleção por talhão/fazenda + ocorrências (local). Offline/sincronização e relatórios completos entram na próxima fase.</div>
       </div>
-      
-      <div id="sidebar" class="controls">
-        <div style="display:flex;gap:10px;margin-bottom:10px;">
-          <select id="profileSelect" style="flex:1">
+
+      <div class="controls">
+        <div class="row" style="margin-bottom:10px;">
+          <select id="profileSelect">
             <option value="user">Perfil: Usuário</option>
             <option value="master">Perfil: Master</option>
           </select>
-          <select id="modeSelect" style="flex:1">
+          <select id="modeSelect">
             <option value="talhao">Modo: Talhão</option>
             <option value="fazenda">Modo: Fazenda</option>
           </select>
         </div>
+
         <select id="farmSelect">
           <option value="">Carregando fazendas…</option>
         </select>
@@ -188,24 +125,28 @@
         <div class="card" id="infoCard">
           <div class="muted">Selecione uma fazenda e clique em um talhão.</div>
         </div>
+
         <div class="card">
           <div class="muted"><b>Obs:</b> “COD” aqui usa o identificador único do KML (campo <i>LAYER</i>). Produção 2025 é cruzada por <i>PROPRIEAD_TALHAO</i>.</div>
         </div>
       </div>
     </div>
-    <button id="btnMenu" class="mobile-menu-btn">☰ Menu</button>
+
     <div id="map"></div>
   </div>
+
+  <!-- Botão + flutuante -->
+  <button id="fabAdd" title="Criar ocorrência">+</button>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/@tmcw/togeojson@5.6.2/dist/togeojson.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
-  
+
   <div class="modal-backdrop" id="modalBackdrop">
     <div class="modal">
       <header>
         <div id="modalTitle" style="font-weight:700;">Nova ocorrência</div>
-        <div class="small" id="modalSub"></div>
+        <div class="muted" id="modalSub"></div>
       </header>
       <main id="modalBody"></main>
       <footer>
@@ -216,5 +157,15 @@
   </div>
 
   <script src="app.js"></script>
-<button id="btnMenu" class="mobile-menu-btn">☰ Menu</button>
+
+  <script>
+    // Evita mapa branco no celular (Leaflet)
+    window.addEventListener("load", () => {
+      if (window.map && map.invalidateSize) setTimeout(() => map.invalidateSize(), 300);
+    });
+    window.addEventListener("resize", () => {
+      if (window.map && map.invalidateSize) setTimeout(() => map.invalidateSize(), 200);
+    });
+  </script>
+</body>
 </html>
