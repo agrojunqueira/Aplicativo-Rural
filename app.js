@@ -752,3 +752,19 @@ init().catch(err=>{
   const card = document.getElementById("infoCard");
   card.innerHTML = `<div class="muted">Erro ao carregar. Veja o console.</div>`;
 });
+// ===== MENU MOBILE: abre/fecha gaveta =====
+(function () {
+  const btn = document.getElementById("btnMenu");
+  const sidebar = document.getElementById("sidebar");
+  if (!btn || !sidebar) return;
+
+  btn.addEventListener("click", () => sidebar.classList.toggle("open"));
+
+  // tocar no mapa fecha o menu (no celular)
+  const mapEl = document.getElementById("map");
+  if (mapEl) {
+    mapEl.addEventListener("click", () => {
+      if (window.innerWidth <= 820) sidebar.classList.remove("open");
+    });
+  }
+})();
