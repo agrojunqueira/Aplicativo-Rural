@@ -145,10 +145,15 @@
   <!-- Botão + flutuante -->
   <button id="fabAdd" title="Criar ocorrência">+</button>
 
+  <!-- Libs do mapa -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/@tmcw/togeojson@5.6.2/dist/togeojson.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
+  <!-- SUPABASE (PRECISA vir ANTES do app.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Modal -->
   <div class="modal-backdrop" id="modalBackdrop">
     <div class="modal">
       <header>
@@ -163,6 +168,7 @@
     </div>
   </div>
 
+  <!-- Seu app -->
   <script src="app.js"></script>
 
   <script>
