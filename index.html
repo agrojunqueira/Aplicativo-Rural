@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="pt-br">
 <head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Aplicativo Rural — MVP</title>
@@ -53,6 +54,32 @@
       .side{width:100%;height:44vh}
       #map{height:56vh}
     }
+    /* ===== AJUSTE PARA CELULAR ===== */
+@media (max-width: 768px) {
+
+  .app {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .side {
+    width: 100%;
+  }
+
+  #sidebar {
+    width: 100%;
+  }
+
+  #map {
+    height: 60vh;
+    width: 100%;
+  }
+
+  h1 {
+    font-size: 18px;
+  }
+
+}
   </style>
 </head>
 <body>
@@ -63,7 +90,7 @@
         <div class="sub">MVP: mapa + seleção por talhão/fazenda + ocorrências (local). Offline/sincronização e relatórios completos entram na próxima fase.</div>
       </div>
       
-      <div class="controls">
+      <div id="sidebar" class="controls">
         <div style="display:flex;gap:10px;margin-bottom:10px;">
           <select id="profileSelect" style="flex:1">
             <option value="user">Perfil: Usuário</option>
@@ -88,6 +115,7 @@
         </div>
       </div>
     </div>
+    <button id="btnMenu" class="mobile-menu-btn">☰ Menu</button>
     <div id="map"></div>
   </div>
 
