@@ -1,4 +1,3 @@
-
 let map;
 let geoLayer;
 let farms = new Map(); // farmCode -> {name, features[]}
@@ -89,7 +88,6 @@ function openModal({title, sub, bodyHtml, onSave}){
   }
   cancel.onclick = close;
   bd.onclick = (e)=>{ if(e.target === bd) close(); };
-
 
   // if no onSave provided, use Save as "Fechar" and hide Cancel
   if(!onSave){
@@ -231,8 +229,11 @@ function renderFarmCard(farmCode){
       <div id="occList"></div>
     </div>
   `;
+
   document.getElementById("btnNewOccFarm").onclick = ()=> openOccForm({scope:"fazenda", farmCode, farmName:farm.name, talhao:null});
   document.getElementById("btnRefreshOccFarm").onclick = ()=> renderOccList({scope:"fazenda", farmCode, talhao:null});
+  document.getElementById("btnPendReport").onclick = ()=> window.__openPendReport(farmCode);
+
   renderOccList({scope:"fazenda", farmCode, talhao:null});
 }
 
@@ -247,38 +248,38 @@ function renderOccList({scope, farmCode, talhao}){
   list.sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
   const wrap = document.getElementById("occList");
   if(!wrap) return;
+
   if(list.length===0){
     wrap.innerHTML = `<div class="muted" style="margin-top:10px;">Nenhuma ocorrência registrada ainda.</div>`;
     return;
   }
+
   wrap.innerHTML = list.map(o=>{
     const where = o.scope==="talhao" ? `Talhão ${o.talhao}` : "Fazenda";
     const pr = (o.pragas||[]).map(x=>`<span class="tag">${x}</span>`).join("");
     const mt = (o.matos||[]).map(x=>`<span class="tag">${x}</span>`).join("");
-    const fotos = (o.photos||[]).length ? `<div class="thumbs">` + (o.photos||[]).slice(0,3).map((p,idx)=>`<img class="thumb" src="${p}" title="Abrir" onclick="window.__openPhotoViewer(\'${o.id}\', ${idx})" />`).join("") + ((o.photos||[]).length>3?`<div class="thumb-more" onclick="window.__openPhotoViewer(\'${o.id}\', 0)">+${(o.photos||[]).length-3}</div>`:"") + `</div>` : "";
+    const fotos = (o.photos||[]).length
+      ? `<div class="thumbs">` +
+          (o.photos||[]).slice(0,3).map((p,idx)=>`<img class="thumb" src="${p}" title="Abrir" onclick="window.__openPhotoViewer('${o.id}', ${idx})" />`).join("") +
+          ((o.photos||[]).length>3?`<div class="thumb-more" onclick="window.__openPhotoViewer('${o.id}', 0)">+${(o.photos||[]).length-3}</div>`:"") +
+        `</div>`
+      : "";
+
     const dt = new Date(o.date||o.createdAt||Date.now());
     const dtStr = dt.toLocaleDateString("pt-BR");
-    const canClose = getProfile()==="master";
-    const action = `
-      <div class="row" style="margin-top:8px;">
-        <select data-id="${o.id}" class="statusSel">
-          <option ${o.status==="Pendente"?"selected":""}>Pendente</option>
-          <option ${o.status==="Em andamento"?"selected":""}>Em andamento</option>
-          <option ${o.status==="Feito"?"selected":""}>Feito</option>
-        </select>
-        <button class="secondary" data-id="${o.id}" class="btnEdit">Editar</button>
-      </div>
-    `;
+
     return `
       <div class="occ-item">
         <div class="occ-head">
-          <div><b>${o.cultura || "—"}</b> • ${where} • <span class="small">${dtStr}</span></div>
+          <div><b>${escapeHtml(o.cultura || "—")}</b> • ${where} • <span class="small">${dtStr}</span></div>
           ${statusBadge(o.status)}
         </div>
+
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao||"—")}</div>
         ${o.pragas?.length ? `<div class="small" style="margin-top:6px;"><b>Pragas:</b> ${pr}</div>` : ``}
         ${o.matos?.length ? `<div class="small" style="margin-top:6px;"><b>Matos:</b> ${mt}</div>` : ``}
         ${fotos}
+
         <div class="row" style="margin-top:8px;">
           <select data-id="${o.id}" class="statusSel" style="flex:1;">
             <option value="Pendente" ${o.status==="Pendente"?"selected":""}>Pendente</option>
@@ -296,11 +297,13 @@ function renderOccList({scope, farmCode, talhao}){
     sel.onchange = ()=>{
       const id = sel.getAttribute("data-id");
       const next = sel.value;
+
       if(next==="Feito" && getProfile()!=="master"){
         alert("Só Master pode finalizar como FEITO.");
         sel.value = "Em andamento";
         return;
       }
+
       if(next==="Feito"){
         openModal({
           title:"Finalizar ocorrência",
@@ -317,15 +320,15 @@ function renderOccList({scope, farmCode, talhao}){
               arr[idx].doneAt = Date.now();
               saveOcc(arr);
             }
-            // re-render current card
             refreshCurrentCard();
             return true;
           }
         });
-        // revert select until modal saves
+
         sel.value = "Em andamento";
         return;
       }
+
       const arr = loadOcc();
       const idx = arr.findIndex(o=>o.id===id);
       if(idx>=0){
@@ -340,8 +343,6 @@ function renderOccList({scope, farmCode, talhao}){
 function escapeHtml(s){
   return (s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 }
-
-// expose edit
 
 // open photo viewer (lightbox) for an occurrence
 window.__openPhotoViewer = (occId, startIdx=0)=>{
@@ -377,12 +378,14 @@ window.__openPhotoViewer = (occId, startIdx=0)=>{
   };
   render();
 };
+
 // relatório de pendências por fazenda (não-feitos)
 window.__openPendReport = (farmCode)=>{
   const farm = farms.get(farmCode);
   if(!farm) return;
   const all = loadOcc().filter(o=> (o.scope==="fazenda" && o.farmCode===farmCode) || (o.scope==="talhao" && o.farmCode===farmCode));
   const pend = all.filter(o=>o.status!=="Feito");
+
   // group by talhao (null => fazenda)
   const groups = new Map();
   for(const o of pend){
@@ -390,6 +393,7 @@ window.__openPendReport = (farmCode)=>{
     if(!groups.has(key)) groups.set(key, []);
     groups.get(key).push(o);
   }
+
   const rows = [...groups.entries()].map(([k,arr])=>{
     arr.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
     const items = arr.slice(0,8).map(o=>{
@@ -402,6 +406,7 @@ window.__openPendReport = (farmCode)=>{
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao||"—")}</div>
       </div>`;
     }).join("");
+
     return `<div style="margin-top:12px;">
       <div style="font-weight:700;">${escapeHtml(k)} <span class="small">(${arr.length})</span></div>
       ${items}
@@ -437,7 +442,10 @@ window.__editOcc = (id)=>{
 function openOccForm({scope, farmCode, farmName, talhao, existing}){
   const isEdit = !!existing;
   const title = isEdit ? "Editar ocorrência" : "Nova ocorrência";
-  const sub = scope==="talhao" ? `Fazenda ${farmCode} — ${farmName} • Talhão ${talhao}` : `Fazenda ${farmCode} — ${farmName}`;
+  const sub = scope==="talhao"
+    ? `Fazenda ${farmCode} — ${farmName} • Talhão ${talhao}`
+    : `Fazenda ${farmCode} — ${farmName}`;
+
   const culturaVal = existing?.cultura || "Cana";
   const pragasVal = (existing?.pragas||[]).join(", ");
   const matosVal = (existing?.matos||[]).join(", ");
@@ -497,6 +505,7 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
       const obs = document.getElementById("obs").value.trim();
       const date = document.getElementById("date").value;
       let status = document.getElementById("status").value;
+
       if(status==="Feito" && getProfile()!=="master"){
         alert("Só Master pode finalizar como FEITO.");
         status = "Pendente";
@@ -511,10 +520,7 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
       const photos = [];
       for(const f of files){
         const dataUrl = await fileToDataURL(f);
-        // basic cap: skip if too big
-        if(dataUrl.length > 650000){ // ~650KB
-          continue;
-        }
+        if(dataUrl.length > 650000) continue; // ~650KB
         photos.push(dataUrl);
       }
 
@@ -530,7 +536,7 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
         matos,
         observacao: obs,
         date: date ? Date.parse(date) : Date.now(),
-        status: status,
+        status,
         photos: existing?.photos?.length ? existing.photos.concat(photos) : photos,
         createdAt: existing?.createdAt || Date.now(),
       };
@@ -546,7 +552,7 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
         }
       }
 
-      if(isEdit){
+      if(existing){
         const idx = arr.findIndex(o=>o.id===existing.id);
         if(idx>=0) arr[idx]=record;
         else arr.push(record);
@@ -556,7 +562,6 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
       saveOcc(arr);
 
       if(record.status==="Feito"){
-        // ask doneText
         openModal({
           title:"Finalizar ocorrência",
           sub:"Para marcar como FEITO, descreva o que foi feito (obrigatório).",
@@ -583,7 +588,6 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
     }
   });
 
-  // show/hide apply talhoes
   if(scope==="fazenda"){
     const applySel = document.getElementById("farmApply");
     const wrap = document.getElementById("farmApplyTalhoesWrap");
@@ -634,15 +638,18 @@ function refreshCurrentCard(){
   }else if(mode==="fazenda" && currentFarmCode){
     renderFarmCard(currentFarmCode);
   }
-  // also update styles (status affects badges only for now)
 }
 
 async function init(){
   map = L.map('map');
+  // expõe para o index.html (evitar “mapa branco” no iPhone)
+  window.__leafletMap = map;
+
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 20,
     attribution: '&copy; OpenStreetMap'
   }).addTo(map);
+
   map.setView([-20.3, -49.2], 10);
 
   prod2025 = await (await fetch('data/producao2025.json')).json();
@@ -677,33 +684,41 @@ async function init(){
   function drawFarm(code){
     clearFarmLabel();
     currentSelectedFeature = null;
+
     const card = document.getElementById("infoCard");
     if(geoLayer){ geoLayer.remove(); }
+
     if(!code || !farms.has(code)) {
       card.innerHTML = `<div class="muted">Selecione uma fazenda.</div>`;
       return;
     }
+
     currentFarmCode = code;
+
     const fc = {type:"FeatureCollection", features: farms.get(code).features};
+
     geoLayer = L.geoJSON(fc, {
       style: (feature)=>{
-      const props = feature.properties || {};
-      const inf = (props["INF."] ?? props.INF ?? "").toString();
-      const {farmCode, talhao} = parseFarmName(inf);
-      const st = computeStatusForTalhao(farmCode, talhao);
-      let fillColor = "#60a5fa"; // default
-      if(st==="Pendente") fillColor = "#f59e0b";
-      else if(st==="Em andamento") fillColor = "#9ca3af";
-      else if(st==="OK") fillColor = "#34d399";
-      return {weight:1, fillOpacity:0.25, fillColor};
-    },
+        const props = feature.properties || {};
+        const inf = (props["INF."] ?? props.INF ?? "").toString();
+        const {farmCode, talhao} = parseFarmName(inf);
+        const st = computeStatusForTalhao(farmCode, talhao);
+
+        let fillColor = "#60a5fa"; // default
+        if(st==="Pendente") fillColor = "#f59e0b";
+        else if(st==="Em andamento") fillColor = "#9ca3af";
+        else if(st==="OK") fillColor = "#34d399";
+
+        return {weight:1, fillOpacity:0.25, fillColor};
+      },
       onEachFeature: (feature, layer)=>{
         layer.on('click', ()=>{
           const mode = getMode();
+
           if(mode==="fazenda"){
-            // highlight all, zoom + farm card
             geoLayer.eachLayer(l=> l.setStyle({weight:1, fillOpacity:0.08}));
             layer.setStyle({weight:2, fillOpacity:0.22});
+
             const b = geoLayer.getBounds();
             map.fitBounds(b, {padding:[20,20]});
             setFarmLabel(code, b);
@@ -711,6 +726,7 @@ async function init(){
           }else{
             currentSelectedFeature = feature;
             renderTalhaoCard(feature);
+
             layer.setStyle({weight:3, fillOpacity:0.25});
             geoLayer.eachLayer(l=>{
               if(l !== layer) l.setStyle({weight:1, fillOpacity:0.15});
@@ -722,23 +738,57 @@ async function init(){
 
     const b = geoLayer.getBounds();
     map.fitBounds(b, {padding:[20,20]});
-    // show farm card by default in farm mode, else instructions
+
     if(getMode()==="fazenda"){
       setFarmLabel(code, b);
       renderFarmCard(code);
     }else{
       card.innerHTML = `<div class="muted">Clique em um talhão no mapa para ver detalhes e criar ocorrências.</div>`;
     }
+
+    // garante Leaflet render no mobile
+    setTimeout(()=> map.invalidateSize(), 250);
   }
 
   select.addEventListener('change', e=> drawFarm(e.target.value));
+
   document.getElementById("modeSelect").addEventListener('change', ()=>{
-    // redraw current farm for correct default view
     drawFarm(select.value);
   });
+
   document.getElementById("profileSelect").addEventListener('change', ()=>{
     refreshCurrentCard();
   });
+
+  // ===== BOTÃO + (FAB) NO CELULAR =====
+  const fab = document.getElementById("fabAdd");
+  if (fab) {
+    fab.addEventListener("click", () => {
+      const farmCode = currentFarmCode || document.getElementById("farmSelect")?.value;
+      if (!farmCode) {
+        alert("Selecione uma fazenda primeiro.");
+        return;
+      }
+
+      const mode = getMode();
+
+      if (mode === "talhao") {
+        if (!currentSelectedFeature) {
+          alert("No modo Talhão, clique em um talhão no mapa antes de criar ocorrência.");
+          return;
+        }
+        const props = currentSelectedFeature.properties || {};
+        const inf = (props["INF."] ?? props.INF ?? "").toString();
+        const { farmCode, farmName, talhao } = parseFarmName(inf);
+        openOccForm({ scope: "talhao", farmCode, farmName, talhao });
+        return;
+      }
+
+      const farm = farms.get(farmCode);
+      const farmName = farm?.name || "";
+      openOccForm({ scope: "fazenda", farmCode, farmName, talhao: null });
+    });
+  }
 
   const first = select.options[1]?.value;
   if(first){
@@ -750,21 +800,5 @@ async function init(){
 init().catch(err=>{
   console.error(err);
   const card = document.getElementById("infoCard");
-  card.innerHTML = `<div class="muted">Erro ao carregar. Veja o console.</div>`;
+  if(card) card.innerHTML = `<div class="muted">Erro ao carregar. Veja o console.</div>`;
 });
-// ===== MENU MOBILE: abre/fecha gaveta =====
-(function () {
-  const btn = document.getElementById("btnMenu");
-  const sidebar = document.getElementById("sidebar");
-  if (!btn || !sidebar) return;
-
-  btn.addEventListener("click", () => sidebar.classList.toggle("open"));
-
-  // tocar no mapa fecha o menu (no celular)
-  const mapEl = document.getElementById("map");
-  if (mapEl) {
-    mapEl.addEventListener("click", () => {
-      if (window.innerWidth <= 820) sidebar.classList.remove("open");
-    });
-  }
-})();
