@@ -2,8 +2,15 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8" />
+
+  <!-- iPhone / PWA friendly -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#111827" />
+
   <title>Aplicativo Rural — MVP</title>
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
   <style>
@@ -17,6 +24,7 @@
       width:360px; min-width:320px; max-width:420px;
       overflow-y:auto; background:#fff; z-index:2000;
       border-right:1px solid #e5e7eb;
+      -webkit-overflow-scrolling: touch;
     }
 
     .brand{padding:14px 14px 10px;border-bottom:1px solid #e5e7eb;}
@@ -55,9 +63,9 @@
 
     /* ====== BOTÃO + (FAB) ====== */
     #fabAdd{
-      display:none; /* só aparece no mobile */
+      display:none;
       position:fixed;
-      left:18px; bottom:88px; /* sobe um pouco pra não brigar com a barra do Safari */
+      left:18px; bottom:88px;
       width:64px; height:64px;
       border-radius:999px;
       border:none;
@@ -69,7 +77,7 @@
       box-shadow:0 12px 30px rgba(0,0,0,.25);
     }
 
-    /* ====== MOBILE (sidebar fixa em cima + mapa embaixo + botão +) ====== */
+    /* ====== MOBILE ====== */
     @media (max-width: 900px){
       body{ overflow:hidden; }
 
@@ -87,15 +95,15 @@
         z-index:5000;
         border-right:none;
         border-bottom:1px solid #e5e7eb;
-        max-height: 46vh;         /* sidebar não pode engolir o mapa */
+        max-height: 46vh;
         overflow-y:auto;
         -webkit-overflow-scrolling: touch;
       }
 
       #map{
         flex:1;
-        height:auto;               /* deixa o flex mandar */
-        min-height: 54vh;          /* garante espaço pro mapa */
+        height:auto;
+        min-height: 54vh;
       }
 
       #fabAdd{ display:block; }
@@ -168,18 +176,30 @@
     </div>
   </div>
 
-  <!-- Seu app -->
-  <script src="app.js"></script>
+  <!-- Seu app (USAR ./ para não dar ruim em favorito/atalho iOS) -->
+  <script src="./app.js"></script>
 
   <script>
-    // Corrige “mapa branco” no iPhone quando abre/rola/fecha teclado etc.
+    // (OPCIONAL) Se você tem algum service worker antigo cacheando, isso mata a dor.
+    // Se você NÃO usa service worker, pode deixar assim mesmo.
+    try{
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(regs=>{
+          regs.forEach(r=>r.unregister());
+        });
+      }
+    }catch(e){}
+
+    // Corrige “mapa branco” no iPhone (atalho/favorito/voltar do background)
     function fixLeafletSize() {
       const m = window.__leafletMap;
       if (m && m.invalidateSize) setTimeout(() => m.invalidateSize(), 250);
     }
+
     window.addEventListener("load", fixLeafletSize);
     window.addEventListener("resize", fixLeafletSize);
     document.addEventListener("visibilitychange", fixLeafletSize);
+    window.addEventListener("pageshow", fixLeafletSize); // importante no iOS
   </script>
 </body>
 </html>
