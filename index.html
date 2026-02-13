@@ -44,7 +44,7 @@
     .row > *{flex:1;}
 
     /* ====== MAPA ====== */
-    #map{flex:1;height:100vh; min-height: 0;} /* min-height 0 ajuda no iOS */
+    #map{flex:1;height:100vh; min-height: 0;}
 
     /* ====== MODAL ====== */
     .modal-backdrop{
@@ -116,7 +116,7 @@
     <div class="side" id="sidebar">
       <div class="brand">
         <h1>Aplicativo Rural — MVP (Mapa + Talhão)</h1>
-        <div class="sub">MVP: mapa + seleção por talhão/fazenda + ocorrências (local). Offline/sincronização e relatórios completos entram na próxima fase.</div>
+        <div class="sub">MVP: mapa + seleção por talhão/fazenda + ocorrências. Fotos no Supabase Storage.</div>
       </div>
 
       <div class="controls">
@@ -142,7 +142,7 @@
         </div>
 
         <div class="card">
-          <div class="muted"><b>Obs:</b> “COD” aqui usa o identificador único do KML (campo <i>LAYER</i>). Produção 2025 é cruzada por <i>PROPRIEAD_TALHAO</i>.</div>
+          <div class="muted"><b>Obs:</b> “COD” usa o identificador do KML (campo <i>LAYER</i>). Produção 2025 cruza por <i>PROPRIEAD_TALHAO</i>.</div>
         </div>
       </div>
     </div>
@@ -160,6 +160,19 @@
 
   <!-- SUPABASE (PRECISA vir ANTES do app.js) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- ✅ CONFIG DO SUPABASE (cole seus valores aqui) -->
+  <script>
+    // Você pode deixar fixo aqui (mais simples) OU puxar do Vercel via window.__ENV (fase 2).
+    window.__SUPABASE_URL = "COLE_AQUI_SUA_SUPABASE_URL";
+    window.__SUPABASE_ANON_KEY = "COLE_AQUI_SUA_SUPABASE_ANON_KEY";
+
+    // bucket que você criou
+    window.__FOTOS_BUCKET = "ocorrencias-fotos";
+
+    // opcional: identifica o “cliente/empresa”
+    window.__EMPRESA_ID = "agrojunqueira";
+  </script>
 
   <!-- Modal -->
   <div class="modal-backdrop" id="modalBackdrop">
@@ -180,8 +193,7 @@
   <script src="./app.js"></script>
 
   <script>
-    // (OPCIONAL) Se você tem algum service worker antigo cacheando, isso mata a dor.
-    // Se você NÃO usa service worker, pode deixar assim mesmo.
+    // Se tiver algum service worker antigo cacheando, isso mata a dor.
     try{
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(regs=>{
@@ -199,7 +211,7 @@
     window.addEventListener("load", fixLeafletSize);
     window.addEventListener("resize", fixLeafletSize);
     document.addEventListener("visibilitychange", fixLeafletSize);
-    window.addEventListener("pageshow", fixLeafletSize); // importante no iOS
+    window.addEventListener("pageshow", fixLeafletSize);
   </script>
 </body>
 </html>
