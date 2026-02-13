@@ -25,12 +25,17 @@ function uid(){
 function parseFarmName(inf){
   // Example: "23110-FLOR DA MATA-01"
   if(!inf) return {farmCode:"", farmName:"", talhao:""};
-  const parts = inf.split("-");
-  if(parts.length < 3){
-    return {farmCode: parts[0] || "", farmName: (parts[1]||"").trim(), talhao: (parts[2]||"").trim()};
+  const parts = String(inf).split("-").map(p=>p.trim()).filter(Boolean);
+
+  if(parts.length === 1){
+    return {farmCode: parts[0] || "", farmName:"", talhao:""};
   }
-  const farmCode = parts[0].trim();
-  const talhao = parts[parts.length-1].trim();
+  if(parts.length === 2){
+    return {farmCode: parts[0] || "", farmName: parts[1] || "", talhao:""};
+  }
+
+  const farmCode = parts[0] || "";
+  const talhao = parts[parts.length-1] || "";
   const farmName = parts.slice(1, parts.length-1).join("-").trim();
   return {farmCode, farmName, talhao};
 }
@@ -55,6 +60,15 @@ function statusBadge(status){
   return `<span class="badge gray">${status||"—"}</span>`;
 }
 
+/**
+ * IMPORTANTE:
+ * Agora o talhão é impactado por ocorrência:
+ * - scope==="talhao" (normal)
+ * - scope==="fazenda" com farmApply === "todos" ou "selecionar" (replicadas em talhão)
+ *
+ * Pra simplificar e ficar consistente, eu repliquei em talhão no SAVE (mais abaixo).
+ * Então aqui segue olhando só talhão mesmo.
+ */
 function computeStatusForTalhao(farmCode, talhao){
   const occ = loadOcc().filter(o => o.scope==="talhao" && o.farmCode===farmCode && o.talhao===talhao);
   if(occ.some(o=>o.status==="Pendente")) return "Pendente";
@@ -63,7 +77,7 @@ function computeStatusForTalhao(farmCode, talhao){
 }
 
 function computeStatusForFarm(farmCode){
-  const all = loadOcc().filter(o => (o.scope==="fazenda" && o.farmCode===farmCode) || (o.scope==="talhao" && o.farmCode===farmCode));
+  const all = loadOcc().filter(o => o.farmCode===farmCode);
   if(all.some(o=>o.status==="Pendente")) return "Pendente";
   if(all.some(o=>o.status==="Em andamento")) return "Em andamento";
   return "OK";
@@ -89,7 +103,6 @@ function openModal({title, sub, bodyHtml, onSave}){
   cancel.onclick = close;
   bd.onclick = (e)=>{ if(e.target === bd) close(); };
 
-  // if no onSave provided, use Save as "Fechar" and hide Cancel
   if(!onSave){
     save.textContent = "Fechar";
     cancel.style.display = "none";
@@ -121,7 +134,6 @@ function renderTalhaoCard(feature){
   const chave = chaveFromProps(props);
   const prod = prod2025[chave] || {};
 
-  // area (ha)
   let areaHa = null;
   try{ areaHa = turf.area(feature)/10000.0; }catch(e){}
 
@@ -175,7 +187,6 @@ function renderFarmCard(farmCode){
   if(!farm) return;
   const status = computeStatusForFarm(farmCode);
 
-  // area total and prod média ponderada
   let totalHa = 0;
   let sumTch=0, sumAtr=0, sumW=0;
   farm.features.forEach(f=>{
@@ -243,7 +254,8 @@ function renderOccList({scope, farmCode, talhao}){
   if(scope==="talhao"){
     list = all.filter(o=>o.scope==="talhao" && o.farmCode===farmCode && o.talhao===talhao);
   }else{
-    list = all.filter(o=> (o.scope==="fazenda" && o.farmCode===farmCode) || (o.scope==="talhao" && o.farmCode===farmCode));
+    // Fazenda: mostra tudo da fazenda (fazenda + talhão)
+    list = all.filter(o=>o.farmCode===farmCode);
   }
   list.sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
   const wrap = document.getElementById("occList");
@@ -292,7 +304,6 @@ function renderOccList({scope, farmCode, talhao}){
     `;
   }).join("");
 
-  // hook status change
   wrap.querySelectorAll(".statusSel").forEach(sel=>{
     sel.onchange = ()=>{
       const id = sel.getAttribute("data-id");
@@ -344,7 +355,6 @@ function escapeHtml(s){
   return (s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 }
 
-// open photo viewer (lightbox) for an occurrence
 window.__openPhotoViewer = (occId, startIdx=0)=>{
   const occ = loadOcc().find(o=>o.id===occId);
   if(!occ || !occ.photos || !occ.photos.length) return;
@@ -368,7 +378,6 @@ window.__openPhotoViewer = (occId, startIdx=0)=>{
       bodyHtml,
       onSave: null
     });
-    // hook nav
     setTimeout(()=>{
       const prev=document.getElementById("pvPrev");
       const next=document.getElementById("pvNext");
@@ -379,14 +388,12 @@ window.__openPhotoViewer = (occId, startIdx=0)=>{
   render();
 };
 
-// relatório de pendências por fazenda (não-feitos)
 window.__openPendReport = (farmCode)=>{
   const farm = farms.get(farmCode);
   if(!farm) return;
-  const all = loadOcc().filter(o=> (o.scope==="fazenda" && o.farmCode===farmCode) || (o.scope==="talhao" && o.farmCode===farmCode));
+  const all = loadOcc().filter(o=>o.farmCode===farmCode);
   const pend = all.filter(o=>o.status!=="Feito");
 
-  // group by talhao (null => fazenda)
   const groups = new Map();
   for(const o of pend){
     const key = o.scope==="talhao" ? `Talhão ${o.talhao}` : "Fazenda (geral)";
@@ -520,11 +527,108 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
       const photos = [];
       for(const f of files){
         const dataUrl = await fileToDataURL(f);
-        if(dataUrl.length > 650000) continue; // ~650KB
-        photos.push(dataUrl);
+        if(dataUrl && dataUrl.length > 650000) continue; // ~650KB
+        if(dataUrl) photos.push(dataUrl);
       }
 
       const arr = loadOcc();
+
+      // ====== NOVO: se for FAZENDA e aplicar em talhões, REPLICA como scope talhao ======
+      if(scope==="fazenda"){
+        const apply = document.getElementById("farmApply").value;
+
+        // ocorrência "geral" (continua sendo fazenda)
+        if(apply === "geral"){
+          const record = {
+            id: existing?.id || uid(),
+            scope: "fazenda",
+            farmCode,
+            farmName,
+            talhao: null,
+            cultura,
+            pragas,
+            matos,
+            observacao: obs,
+            date: date ? Date.parse(date) : Date.now(),
+            status,
+            photos: existing?.photos?.length ? existing.photos.concat(photos) : photos,
+            createdAt: existing?.createdAt || Date.now(),
+            farmApply: "geral",
+            farmApplyTalhoes: []
+          };
+
+          if(existing){
+            const idx = arr.findIndex(o=>o.id===existing.id);
+            if(idx>=0) arr[idx]=record;
+            else arr.push(record);
+          }else{
+            arr.push(record);
+          }
+
+          saveOcc(arr);
+          refreshCurrentCard();
+          return true;
+        }
+
+        // pegar lista de talhões da fazenda
+        const farm = farms.get(farmCode);
+        const talhoesDaFazenda = (farm?.features || [])
+          .map(f=>{
+            const inf2 = (f.properties?.["INF."] ?? f.properties?.INF ?? "").toString();
+            const parsed = parseFarmName(inf2);
+            return parsed.talhao;
+          })
+          .filter(Boolean);
+
+        let alvo = [];
+        if(apply === "todos"){
+          alvo = talhoesDaFazenda;
+        }else{
+          const t = document.getElementById("farmApplyTalhoes").value
+            .split(",")
+            .map(s=>s.trim())
+            .filter(Boolean);
+          // mantém só os que existem na fazenda (evita digitação errada)
+          const setTalhoes = new Set(talhoesDaFazenda);
+          alvo = t.filter(x=>setTalhoes.has(x));
+        }
+
+        if(!alvo.length){
+          alert("Nenhum talhão válido selecionado para aplicar.");
+          return false;
+        }
+
+        // se estiver editando: remove as ocorrências antigas "replicadas" do mesmo grupo
+        const groupId = existing?.groupId || uid(); // id do grupo pra rastrear
+        const filtered = arr.filter(o => o.groupId !== groupId);
+        const baseCreatedAt = existing?.createdAt || Date.now();
+
+        const novos = alvo.map(tal => ({
+          id: uid(),
+          groupId,
+          scope: "talhao",
+          farmCode,
+          farmName,
+          talhao: tal,
+          cultura,
+          pragas,
+          matos,
+          observacao: obs,
+          date: date ? Date.parse(date) : Date.now(),
+          status,
+          photos: photos, // em réplica, não concatena com antigas (mais limpo)
+          createdAt: baseCreatedAt,
+          fromFarm: true,      // só pra identificar
+          farmApply: apply,
+        }));
+
+        saveOcc(filtered.concat(novos));
+
+        refreshCurrentCard();
+        return true;
+      }
+
+      // ====== TALHÃO normal ======
       const record = {
         id: existing?.id || uid(),
         scope,
@@ -541,17 +645,6 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
         createdAt: existing?.createdAt || Date.now(),
       };
 
-      if(scope==="fazenda"){
-        const apply = document.getElementById("farmApply").value;
-        record.farmApply = apply;
-        if(apply==="selecionar"){
-          const t = document.getElementById("farmApplyTalhoes").value.split(",").map(s=>s.trim()).filter(Boolean);
-          record.farmApplyTalhoes = t;
-        }else{
-          record.farmApplyTalhoes = [];
-        }
-      }
-
       if(existing){
         const idx = arr.findIndex(o=>o.id===existing.id);
         if(idx>=0) arr[idx]=record;
@@ -559,6 +652,7 @@ function openOccForm({scope, farmCode, farmName, talhao, existing}){
       }else{
         arr.push(record);
       }
+
       saveOcc(arr);
 
       if(record.status==="Feito"){
@@ -642,7 +736,6 @@ function refreshCurrentCard(){
 
 async function init(){
   map = L.map('map');
-  // expõe para o index.html (evitar “mapa branco” no iPhone)
   window.__leafletMap = map;
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -652,16 +745,17 @@ async function init(){
 
   map.setView([-20.3, -49.2], 10);
 
-  prod2025 = await (await fetch('data/producao2025.json')).json();
+  // ✅ IMPORTANTÍSSIMO: usar ./ para evitar bug de favorito/atalho no iPhone
+  prod2025 = await (await fetch('./data/producao2025.json')).json();
 
-  const kmlText = await (await fetch('data/geral.kml')).text();
+  const kmlText = await (await fetch('./data/geral.kml')).text();
   const dom = new DOMParser().parseFromString(kmlText, 'text/xml');
   const geojson = toGeoJSON.kml(dom);
 
   // organize by farm
   geojson.features.forEach(f=>{
     const props = f.properties || {};
-    const inf = (props["INF."] ?? "").toString();
+    const inf = (props["INF."] ?? props.INF ?? "").toString();
     const {farmCode, farmName} = parseFarmName(inf);
     if(!farms.has(farmCode)){
       farms.set(farmCode,{name:farmName || farmCode, features:[]});
@@ -704,7 +798,7 @@ async function init(){
         const {farmCode, talhao} = parseFarmName(inf);
         const st = computeStatusForTalhao(farmCode, talhao);
 
-        let fillColor = "#60a5fa"; // default
+        let fillColor = "#60a5fa";
         if(st==="Pendente") fillColor = "#f59e0b";
         else if(st==="Em andamento") fillColor = "#9ca3af";
         else if(st==="OK") fillColor = "#34d399";
@@ -746,7 +840,6 @@ async function init(){
       card.innerHTML = `<div class="muted">Clique em um talhão no mapa para ver detalhes e criar ocorrências.</div>`;
     }
 
-    // garante Leaflet render no mobile
     setTimeout(()=> map.invalidateSize(), 250);
   }
 
