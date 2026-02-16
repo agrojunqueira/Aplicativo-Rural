@@ -9,6 +9,10 @@ let farmLabelMarker = null;
 // =============================
 const SUPABASE_URL = window.__SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || "";
+console.log("SUPABASE_URL:", SUPABASE_URL);
+console.log("SUPABASE_KEY_PREFIX:", (SUPABASE_ANON_KEY || "").slice(0, 20));
+console.log("SUPABASE_KEY_IS_EYJ:", (SUPABASE_ANON_KEY || "").startsWith("eyJ"));
+console.log("SUPABASE_KEY_IS_PUBLISHABLE:", (SUPABASE_ANON_KEY || "").startsWith("sb_publishable_"));
 const EMPRESA_ID = window.__EMPRESA_ID || "default";
 const FOTOS_BUCKET = window.__FOTOS_BUCKET || "ocorrencias-fotos";
 
