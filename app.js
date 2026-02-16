@@ -664,7 +664,7 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
             const { error } = await insertOccSupabaseMin({ id: record.id, farmCode: record.farmCode });
             if (error) {
               console.warn("❌ Supabase INSERT falhou (fazenda/geral):", error);
-              alert("⚠️ Não salvou no Supabase (vou salvar local). Veja o Console (F12).");
+              alert("⚠️ Supabase bloqueou (401/Policy). Ajuste as POLICIES no Supabase. Veja Console (F12).");
             } else {
               console.log("✅ Supabase INSERT OK (fazenda/geral)");
             }
