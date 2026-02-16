@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
 
+  <!-- iPhone / PWA friendly -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -16,6 +17,8 @@
     html, body { height: 100%; }
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
     .app{display:flex;height:100vh;}
+
+    /* Sidebar */
     .side{
       width:360px; min-width:320px; max-width:420px;
       overflow-y:auto; background:#fff; z-index:2000;
@@ -29,12 +32,53 @@
     select,input,button,textarea{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;}
     button{cursor:pointer;background:#111827;color:#fff;border:none;border-radius:10px;}
     button.secondary{background:#f3f4f6;color:#111827;border:1px solid #e5e7eb;}
+
     .panel{padding:14px;overflow:auto;}
     .card{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin-bottom:12px;}
     .muted{color:#6b7280;font-size:12px}
     .row{display:flex;gap:10px;}
     .row > *{flex:1;}
+
+    /* Mapa */
     #map{flex:1;height:100vh; min-height: 0;}
+
+    /* Modal */
+    .modal-backdrop{
+      position:fixed; inset:0; background:rgba(0,0,0,.35);
+      display:none; align-items:center; justify-content:center;
+      padding:16px; z-index:9999;
+    }
+    .modal{
+      background:#fff; border-radius:16px; max-width:520px; width:100%;
+      max-height:92vh; overflow:auto; border:1px solid #e5e7eb;
+    }
+    .modal header{padding:14px 16px;border-bottom:1px solid #e5e7eb;}
+    .modal main{padding:16px;}
+    .modal footer{padding:14px 16px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;}
+    label{font-size:12px;color:#374151;font-weight:600;display:block;margin:10px 0 6px;}
+
+    /* FAB (+) opcional */
+    #fabAdd{
+      display:none;
+      position:fixed; left:18px; bottom:88px;
+      width:64px; height:64px; border-radius:999px;
+      border:none; font-size:34px; font-weight:800;
+      background:#111827; color:#fff; z-index:7000;
+      box-shadow:0 12px 30px rgba(0,0,0,.25);
+    }
+
+    /* Mobile */
+    @media (max-width: 900px){
+      .app{flex-direction:column;height:100vh;}
+      .side{
+        width:100%; max-width:none; min-width:0;
+        position:sticky; top:0; z-index:5000;
+        border-right:none; border-bottom:1px solid #e5e7eb;
+        max-height:46vh; overflow-y:auto;
+      }
+      #map{flex:1;height:auto;min-height:54vh;}
+      #fabAdd{ display:block; }
+    }
   </style>
 </head>
 
@@ -73,27 +117,30 @@
     <div id="map"></div>
   </div>
 
-  <!-- Leaflet -->
+  <!-- Botão + flutuante (mobile) -->
+  <button id="fabAdd" title="Criar ocorrência">+</button>
+
+  <!-- Libs obrigatórias -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/@tmcw/togeojson@5.6.2/dist/togeojson.umd.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
-  <!-- SUPABASE (OBRIGATÓRIO antes do app.js) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Supabase UMD (gera window.supabase) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
-  <!-- CONFIGURAÇÃO SUPABASE -->
- <script>
-  window.__SUPABASE_URL = "https://kqsbjgqtplvooxnqcmft.supabase.co";
-  window.__SUPABASE_ANON_KEY = "sb_publishable_b8R_PutuU4EUd3Tomdq7Bg_j-eqr-H7";
-  window.__FOTOS_BUCKET = "ocorrencias-fotos";
-  window.__EMPRESA_ID = "agrojunqueira";
+  <!-- Config do Supabase (ANTES do app.js) -->
+  <script>
+    window.__SUPABASE_URL = "https://kqsbjgqtplvooxnqcmft.supabase.co";
+    window.__SUPABASE_ANON_KEY = "sb_publishable_b8R_PutuU4EUd3Tomdq7Bg_j-eqr-H7"; // se der erro de permissão, troque pela "Anon Key (Legacy)"
+    window.__FOTOS_BUCKET = "ocorrencias-fotos";
+    window.__EMPRESA_ID = "agrojunqueira";
   </script>
 
-  <!-- Modal -->
+  <!-- Modal (ids precisam bater com o app.js) -->
   <div class="modal-backdrop" id="modalBackdrop">
     <div class="modal">
       <header>
-        <div id="modalTitle" style="font-weight:700;"></div>
+        <div id="modalTitle" style="font-weight:700;">Nova ocorrência</div>
         <div class="muted" id="modalSub"></div>
       </header>
       <main id="modalBody"></main>
@@ -104,8 +151,7 @@
     </div>
   </div>
 
-  <!-- SEU APP -->
+  <!-- Seu app -->
   <script src="./app.js"></script>
-
 </body>
 </html>
