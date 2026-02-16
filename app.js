@@ -80,8 +80,37 @@ function loadOcc() {
 function saveOcc(arr) {
   localStorage.setItem(LS_KEY, JSON.stringify(arr));
 }
+
+// ✅ CORREÇÃO: id compatível com coluna uuid do Supabase
 function uid() {
-  return "O" + Math.random().toString(16).slice(2) + Date.now().toString(16);
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  // fallback (quase-uuid)
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// ✅ PASSO 1: INSERT mínimo no Supabase (só pra provar que grava na tabela)
+// (Depois no PASSO 2 a gente salva tudo em jsonb/colunas)
+async function insertOccSupabaseMin({ id, farmCode }) {
+  if (!sb) return { data: null, error: new Error("Supabase não configurado no front.") };
+
+  const payload = {
+    id,
+    empresa_id: EMPRESA_ID,
+    farm_code: farmCode || null,
+    created_by: null, // sem auth por enquanto
+  };
+
+  const { data, error } = await sb
+    .from("ocorrencias")
+    .insert([payload])
+    .select()
+    .single();
+
+  return { data, error };
 }
 
 function parseFarmName(inf) {
@@ -630,6 +659,20 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
             farmApplyTalhoes: []
           };
 
+          // ✅ PASSO 1: INSERT mínimo no Supabase
+          try {
+            const { error } = await insertOccSupabaseMin({ id: record.id, farmCode: record.farmCode });
+            if (error) {
+              console.warn("❌ Supabase INSERT falhou (fazenda/geral):", error);
+              alert("⚠️ Não salvou no Supabase (vou salvar local). Veja o Console (F12).");
+            } else {
+              console.log("✅ Supabase INSERT OK (fazenda/geral)");
+            }
+          } catch (err) {
+            console.warn("❌ Erro inesperado no Supabase (fazenda/geral):", err);
+            alert("⚠️ Erro ao salvar no Supabase (vou salvar local). Veja o Console (F12).");
+          }
+
           if (existing) {
             const idx = arr.findIndex(o => o.id === existing.id);
             if (idx >= 0) arr[idx] = record;
@@ -715,6 +758,20 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
         photos: existing?.photos?.length ? existing.photos.concat(photos) : photos,
         createdAt: existing?.createdAt || Date.now(),
       };
+
+      // ✅ PASSO 1: INSERT mínimo no Supabase
+      try {
+        const { error } = await insertOccSupabaseMin({ id: record.id, farmCode: record.farmCode });
+        if (error) {
+          console.warn("❌ Supabase INSERT falhou (talhão):", error);
+          alert("⚠️ Não salvou no Supabase (vou salvar local). Veja o Console (F12).");
+        } else {
+          console.log("✅ Supabase INSERT OK (talhão)");
+        }
+      } catch (err) {
+        console.warn("❌ Erro inesperado no Supabase (talhão):", err);
+        alert("⚠️ Erro ao salvar no Supabase (vou salvar local). Veja o Console (F12).");
+      }
 
       if (existing) {
         const idx = arr.findIndex(o => o.id === existing.id);
