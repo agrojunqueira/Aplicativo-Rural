@@ -5,7 +5,7 @@ let prod2025 = {};
 let farmLabelMarker = null;
 
 // =============================
-// SUPABASE
+// SUPABASE CONFIG
 // =============================
 const SUPABASE_URL = window.__SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || "";
@@ -15,7 +15,6 @@ const FOTOS_BUCKET = window.__FOTOS_BUCKET || "ocorrencias-fotos";
 console.log("SUPABASE_URL:", SUPABASE_URL);
 console.log("SUPABASE_KEY_PREFIX:", (SUPABASE_ANON_KEY || "").slice(0, 20));
 console.log("SUPABASE_KEY_IS_EYJ:", (SUPABASE_ANON_KEY || "").startsWith("eyJ"));
-console.log("EMPRESA_ID:", EMPRESA_ID);
 
 let sb = null;
 try {
@@ -26,28 +25,10 @@ try {
   sb = null;
 }
 
-// =============================
-// LOCAL STORAGE (fallback)
-// =============================
-const LS_KEY = "aplicativo_rural_ocorrencias_v2";
-
-function loadOccLocal() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) {
-    return [];
-  }
-}
-function saveOccLocal(arr) {
-  localStorage.setItem(LS_KEY, JSON.stringify(arr));
+function assertSb(){
+  if(!sb) throw new Error("Supabase não configurado no front.");
 }
 
-// =============================
-// UUID
-// =============================
 function uid() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
@@ -58,18 +39,49 @@ function uid() {
 }
 
 // =============================
-// Helpers
+// AUTH / PERFIL
 // =============================
-function escapeHtml(s) {
-  return (s || "").replace(/[&<>"']/g, c => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[c]));
+let __session = null;
+let __user = null;
+let __perfil = null; // {nome, role, empresa_id}
+
+async function guardSession(){
+  assertSb();
+  const { data } = await sb.auth.getSession();
+  __session = data?.session || null;
+  if(!__session){
+    window.location.href = "./login.html";
+    throw new Error("Sem sessão.");
+  }
+  const { data: u } = await sb.auth.getUser();
+  __user = u?.user || null;
+  if(!__user){
+    window.location.href = "./login.html";
+    throw new Error("Sem usuário.");
+  }
+
+  const { data: perfil, error } = await sb
+    .from("usuarios")
+    .select("nome, role, empresa_id")
+    .eq("id", __user.id)
+    .single();
+
+  if(error) throw error;
+
+  __perfil = perfil;
+  if(__perfil?.empresa_id && __perfil.empresa_id !== EMPRESA_ID){
+    console.warn("EMPRESA_ID no front diferente do perfil. Usando perfil:", __perfil.empresa_id);
+  }
+  return { user: __user, perfil: __perfil };
 }
 
+function isMaster(){
+  return (__perfil?.role || "user") === "master";
+}
+
+// =============================
+// STORAGE (FOTOS)
+// =============================
 function slugFileName(name) {
   return String(name || "foto")
     .normalize("NFD")
@@ -77,43 +89,6 @@ function slugFileName(name) {
     .replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-function formatNum(x, dec = 1) {
-  if (x === null || x === undefined || Number.isNaN(x)) return "—";
-  return Number(x).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
-
-function statusBadge(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "pendente") return `<span class="badge orange">Pendente</span>`;
-  if (s === "em andamento") return `<span class="badge gray">Em andamento</span>`;
-  if (s === "feito") return `<span class="badge green">Feito</span>`;
-  return `<span class="badge gray">${status || "—"}</span>`;
-}
-
-function parseFarmName(inf) {
-  // Ex: "23110-FLOR DA MATA-01"
-  if (!inf) return { farmCode: "", farmName: "", talhao: "" };
-  const parts = String(inf).split("-").map(p => p.trim()).filter(Boolean);
-
-  if (parts.length === 1) return { farmCode: parts[0] || "", farmName: "", talhao: "" };
-  if (parts.length === 2) return { farmCode: parts[0] || "", farmName: parts[1] || "", talhao: "" };
-
-  const farmCode = parts[0] || "";
-  const talhao = parts[parts.length - 1] || "";
-  const farmName = parts.slice(1, parts.length - 1).join("-").trim();
-  return { farmCode, farmName, talhao };
-}
-
-function chaveFromProps(props) {
-  const farm = (props.PROPRIEAD ?? "").toString().trim();
-  const tal = (props.TALHAO ?? "").toString().trim();
-  if (!farm || !tal) return "";
-  return `${farm}_${parseInt(tal, 10)}`;
-}
-
-// =============================
-// FOTOS: upload + public url
-// =============================
 async function uploadPhotosToSupabase({ files, farmCode, talhao, occId }) {
   if (!sb) return { urls: [], errors: ["Supabase não configurado no front."] };
 
@@ -124,7 +99,7 @@ async function uploadPhotosToSupabase({ files, farmCode, talhao, occId }) {
     try {
       const safeName = slugFileName(file.name);
       const path =
-        `${EMPRESA_ID}/${farmCode || "sem_fazenda"}/` +
+        `${(__perfil?.empresa_id || EMPRESA_ID)}/${farmCode || "sem_fazenda"}/` +
         `${talhao || "fazenda"}/${occId}/` +
         `${Date.now()}_${safeName}`;
 
@@ -151,96 +126,204 @@ async function uploadPhotosToSupabase({ files, farmCode, talhao, occId }) {
 }
 
 // =============================
-// SUPABASE: salvar e listar ocorrências (source of truth)
+// DB: OCORRÊNCIAS
 // =============================
-async function upsertOccSupabase(record) {
-  if (!sb) return { data: null, error: new Error("Supabase não configurado no front.") };
 
-  // payload = registro inteiro (jsonb)
+// Cache em memória pra ficar rápido
+let OCC_CACHE_BY_FARM = new Map(); // farm_code -> ocorrencias[]
+let FARM_STATUS = new Map(); // farm_code -> "Pendente"|"Em andamento"|"OK"
+
+function normalizeFarmCode(x){
+  if(x === null || x === undefined) return null;
+  return String(x);
+}
+
+async function fetchOccByFarm(farmCode){
+  assertSb();
+  farmCode = normalizeFarmCode(farmCode);
+  const empresa = __perfil?.empresa_id || EMPRESA_ID;
+
+  const { data, error } = await sb
+    .from("ocorrencias")
+    .select("id, empresa_id, farm_code, talhao, cultura, pragas, matos, observacao, status, photos, created_at, created_by, cancelada, cancelada_por, cancelada_em")
+    .eq("empresa_id", empresa)
+    .eq("farm_code", farmCode)
+    .order("created_at", { ascending: false })
+    .limit(2000);
+
+  if(error) throw error;
+  OCC_CACHE_BY_FARM.set(farmCode, data || []);
+  return data || [];
+}
+
+async function fetchFarmStatuses(){
+  assertSb();
+  const empresa = __perfil?.empresa_id || EMPRESA_ID;
+
+  // pega só o que importa pro status do mapa
+  const { data, error } = await sb
+    .from("ocorrencias")
+    .select("farm_code, status, cancelada")
+    .eq("empresa_id", empresa)
+    .order("created_at", { ascending: false })
+    .limit(5000);
+
+  if(error) throw error;
+
+  const map = new Map(); // farm -> {pend:boolean, and:boolean}
+  for(const r of (data || [])){
+    const fc = normalizeFarmCode(r.farm_code);
+    if(!fc) continue;
+    if(r.cancelada) continue;
+
+    if(!map.has(fc)) map.set(fc, { pend:false, and:false });
+    const st = r.status;
+    if(st === "Pendente") map.get(fc).pend = true;
+    if(st === "Em andamento") map.get(fc).and = true;
+  }
+
+  FARM_STATUS.clear();
+  for(const [fc, flags] of map.entries()){
+    if(flags.pend) FARM_STATUS.set(fc, "Pendente");
+    else if(flags.and) FARM_STATUS.set(fc, "Em andamento");
+    else FARM_STATUS.set(fc, "OK");
+  }
+}
+
+function computeStatusForFarmFromCache(farmCode){
+  farmCode = normalizeFarmCode(farmCode);
+  const s = FARM_STATUS.get(farmCode);
+  return s || "OK";
+}
+
+function computeStatusForTalhaoFromCache(farmCode, talhao){
+  farmCode = normalizeFarmCode(farmCode);
+  talhao = talhao ? String(talhao) : null;
+  const rows = OCC_CACHE_BY_FARM.get(farmCode) || [];
+  const tal = rows.filter(o => !o.cancelada && String(o.talhao || "") === String(talhao || ""));
+  if (tal.some(o => o.status === "Pendente")) return "Pendente";
+  if (tal.some(o => o.status === "Em andamento")) return "Em andamento";
+  return "OK";
+}
+
+async function insertOccSupabaseFull(record){
+  assertSb();
+  const empresa = __perfil?.empresa_id || EMPRESA_ID;
+
   const payload = {
     id: record.id,
-    empresa_id: EMPRESA_ID,
-    farm_code: record.farmCode || null,
-    created_by: null, // sem login por enquanto
-    payload: record,
+    empresa_id: empresa,
+    farm_code: normalizeFarmCode(record.farmCode),
+    talhao: record.talhao ? String(record.talhao) : null,
+    cultura: record.cultura || null,
+    pragas: record.pragas || [],
+    matos: record.matos || [],
+    observacao: record.observacao || null,
+    status: record.status || "Pendente",
+    photos: record.photos || [],
+    created_by: __user.id,
+    cancelada: false
   };
 
   const { data, error } = await sb
     .from("ocorrencias")
-    .upsert([payload], { onConflict: "id" })
+    .insert([payload])
     .select()
     .single();
 
-  return { data, error };
+  if(error) throw error;
+  return data;
 }
 
-async function fetchOccFromSupabase({ farmCode }) {
-  if (!sb) return { data: [], error: new Error("Supabase não configurado no front.") };
-
-  let q = sb
+async function updateOccStatus({ id, status }){
+  assertSb();
+  const { data, error } = await sb
     .from("ocorrencias")
-    .select("id, empresa_id, farm_code, payload, created_at")
-    .eq("empresa_id", EMPRESA_ID)
-    .order("created_at", { ascending: false })
-    .limit(500);
+    .update({ status })
+    .eq("id", id)
+    .select()
+    .single();
 
-  if (farmCode) q = q.eq("farm_code", String(farmCode));
-
-  const { data, error } = await q;
-  if (error) return { data: [], error };
-
-  // normaliza para lista de records
-  const list = (data || [])
-    .map(r => r.payload || null)
-    .filter(Boolean);
-
-  return { data: list, error: null };
+  if(error) throw error;
+  return data;
 }
 
-// =============================
-// Estado: ocorrências carregadas (sempre do Supabase)
-// =============================
-let OCC = []; // cache em memória
+async function updateOccFields({ id, patch }){
+  assertSb();
+  const { data, error } = await sb
+    .from("ocorrencias")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
 
-async function refreshOccCache({ farmCode } = {}) {
-  // tenta Supabase
-  try {
-    const { data, error } = await fetchOccFromSupabase({ farmCode: farmCode || null });
-    if (!error) {
-      OCC = data || [];
-      // salva fallback local (pra não perder se ficar sem internet depois)
-      saveOccLocal(OCC);
-      return;
-    }
-    console.warn("⚠️ Supabase fetch erro:", error);
-  } catch (e) {
-    console.warn("⚠️ Supabase fetch exception:", e);
+  if(error) throw error;
+  return data;
+}
+
+async function cancelOcc({ id }){
+  if(!isMaster()){
+    alert("Só Master pode cancelar ocorrência.");
+    return;
   }
+  assertSb();
+  const patch = {
+    cancelada: true,
+    cancelada_por: __user.id,
+    cancelada_em: new Date().toISOString()
+  };
+  const { data, error } = await sb
+    .from("ocorrencias")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
 
-  // fallback local
-  OCC = loadOccLocal();
+  if(error) throw error;
+  return data;
 }
 
 // =============================
-// Status baseado no cache OCC
+// UTIL / UI
 // =============================
-function computeStatusForTalhao(farmCode, talhao) {
-  const occ = OCC.filter(o => o.scope === "talhao" && o.farmCode === farmCode && o.talhao === talhao);
-  if (occ.some(o => o.status === "Pendente")) return "Pendente";
-  if (occ.some(o => o.status === "Em andamento")) return "Em andamento";
-  return "OK";
+function parseFarmName(inf) {
+  if (!inf) return { farmCode: "", farmName: "", talhao: "" };
+  const parts = String(inf).split("-").map(p => p.trim()).filter(Boolean);
+
+  if (parts.length === 1) return { farmCode: parts[0] || "", farmName: "", talhao: "" };
+  if (parts.length === 2) return { farmCode: parts[0] || "", farmName: parts[1] || "", talhao: "" };
+
+  const farmCode = parts[0] || "";
+  const talhao = parts[parts.length - 1] || "";
+  const farmName = parts.slice(1, parts.length - 1).join("-").trim();
+  return { farmCode, farmName, talhao };
 }
 
-function computeStatusForFarm(farmCode) {
-  const all = OCC.filter(o => o.farmCode === farmCode);
-  if (all.some(o => o.status === "Pendente")) return "Pendente";
-  if (all.some(o => o.status === "Em andamento")) return "Em andamento";
-  return "OK";
+function chaveFromProps(props) {
+  const farm = (props.PROPRIEAD ?? "").toString().trim();
+  const tal = (props.TALHAO ?? "").toString().trim();
+  if (!farm || !tal) return "";
+  return `${farm}_${parseInt(tal, 10)}`;
 }
 
-// =============================
-// Modal
-// =============================
+function formatNum(x, dec = 1) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  return Number(x).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+function statusBadge(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "pendente") return `<span class="badge orange">Pendente</span>`;
+  if (s === "em andamento") return `<span class="badge gray">Em andamento</span>`;
+  if (s === "feito") return `<span class="badge green">Feito</span>`;
+  return `<span class="badge gray">${status || "—"}</span>`;
+}
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---- Modal ----
 function openModal({ title, sub, bodyHtml, onSave }) {
   const bd = document.getElementById("modalBackdrop");
   document.getElementById("modalTitle").textContent = title || "Modal";
@@ -276,584 +359,16 @@ function openModal({ title, sub, bodyHtml, onSave }) {
   };
 }
 
-function getProfile() {
-  return document.getElementById("profileSelect")?.value || "user";
-}
 function getMode() {
   return document.getElementById("modeSelect")?.value || "talhao";
 }
 
-// =============================
-// UI: Cards
-// =============================
-function renderTalhaoCard(feature) {
-  const props = feature.properties || {};
-  const layerId = (props.LAYER ?? "").toString();
-  const inf = (props["INF."] ?? props.INF ?? "").toString();
-  const { farmCode, farmName, talhao } = parseFarmName(inf);
-  const chave = chaveFromProps(props);
-  const prod = prod2025[chave] || {};
-
-  let areaHa = null;
-  try { areaHa = turf.area(feature) / 10000.0; } catch (e) {}
-
-  const status = computeStatusForTalhao(farmCode, talhao);
-
-  const card = document.getElementById("infoCard");
-  card.innerHTML = `
-    <div class="topline">
-      <span class="pill"><b>COD</b> ${layerId || "—"}</span>
-      <span class="pill"><b>Fazenda</b> ${farmCode || "—"} — ${farmName || "—"}</span>
-      <span class="pill"><b>Talhão</b> ${talhao || props.TALHAO || "—"}</span>
-      <span class="pill"><b>Status</b> ${status}</span>
-    </div>
-
-    <div class="grid">
-      <div>
-        <div class="k">Área (ha)</div>
-        <div class="v">${formatNum(areaHa, 2)}</div>
-      </div>
-      <div>
-        <div class="k">Cultura / Safra</div>
-        <div class="v">Cana / 2025</div>
-      </div>
-      <div>
-        <div class="k">TCH 2025</div>
-        <div class="v">${formatNum(prod.tch, 1)}</div>
-      </div>
-      <div>
-        <div class="k">ATR 2025</div>
-        <div class="v">${formatNum(prod.atr, 1)}</div>
-      </div>
-    </div>
-
-    <div class="occ">
-      <div class="row">
-        <button id="btnNewOcc">+ Criar Ocorrência (Talhão)</button>
-        <button class="secondary" id="btnRefreshOcc">Atualizar</button>
-      </div>
-      <div class="small" style="margin-top:8px;">Pragas e matos podem ser vazios. “Feito” só no perfil Master.</div>
-      <div id="occList"></div>
-    </div>
-  `;
-
-  document.getElementById("btnNewOcc").onclick = () => openOccForm({ scope: "talhao", farmCode, farmName, talhao });
-  document.getElementById("btnRefreshOcc").onclick = async () => {
-    await refreshOccCache({ farmCode });
-    renderOccList({ scope: "talhao", farmCode, talhao });
-    refreshMapStyles();
-  };
-
-  renderOccList({ scope: "talhao", farmCode, talhao });
-}
-
-function renderFarmCard(farmCode) {
-  const farm = farms.get(farmCode);
-  if (!farm) return;
-
-  const status = computeStatusForFarm(farmCode);
-
-  let totalHa = 0;
-  let sumTch = 0, sumAtr = 0, sumW = 0;
-  farm.features.forEach(f => {
-    let ha = 0;
-    try { ha = turf.area(f) / 10000.0; } catch (e) {}
-    totalHa += ha;
-    const key = chaveFromProps(f.properties || {});
-    const p = prod2025[key];
-    if (p && (p.tch != null || p.atr != null)) {
-      sumW += ha;
-      if (p.tch != null) sumTch += ha * p.tch;
-      if (p.atr != null) sumAtr += ha * p.atr;
-    }
-  });
-
-  const tchMed = sumW ? (sumTch / sumW) : null;
-  const atrMed = sumW ? (sumAtr / sumW) : null;
-
-  const card = document.getElementById("infoCard");
-  card.innerHTML = `
-    <div class="topline">
-      <span class="pill"><b>Fazenda</b> ${farmCode} — ${farm.name}</span>
-      <span class="pill"><b>Status</b> ${status}</span>
-      <span class="pill"><b>Talhões</b> ${farm.features.length}</span>
-    </div>
-    <div class="grid">
-      <div>
-        <div class="k">Área total (ha)</div>
-        <div class="v">${formatNum(totalHa, 2)}</div>
-      </div>
-      <div>
-        <div class="k">Cultura / Safra</div>
-        <div class="v">Cana / 2025</div>
-      </div>
-      <div>
-        <div class="k">TCH médio 2025</div>
-        <div class="v">${formatNum(tchMed, 1)}</div>
-      </div>
-      <div>
-        <div class="k">ATR médio 2025</div>
-        <div class="v">${formatNum(atrMed, 1)}</div>
-      </div>
-    </div>
-
-    <div class="occ">
-      <div class="row">
-        <button id="btnNewOccFarm">+ Criar Ocorrência (Fazenda)</button>
-        <button class="secondary" id="btnPendReport">Pendências</button>
-        <button class="secondary" id="btnRefreshOccFarm">Atualizar</button>
-      </div>
-      <div class="small" style="margin-top:8px;">Ocorrência na fazenda pode ser geral ou aplicada a talhões. “Feito” só no perfil Master.</div>
-      <div id="occList"></div>
-    </div>
-  `;
-
-  document.getElementById("btnNewOccFarm").onclick = () => openOccForm({ scope: "fazenda", farmCode, farmName: farm.name, talhao: null });
-  document.getElementById("btnRefreshOccFarm").onclick = async () => {
-    await refreshOccCache({ farmCode });
-    renderOccList({ scope: "fazenda", farmCode, talhao: null });
-    refreshMapStyles();
-  };
-  document.getElementById("btnPendReport").onclick = () => window.__openPendReport(farmCode);
-
-  renderOccList({ scope: "fazenda", farmCode, talhao: null });
-}
-
-function renderOccList({ scope, farmCode, talhao }) {
-  let list = [];
-  if (scope === "talhao") {
-    list = OCC.filter(o => o.scope === "talhao" && o.farmCode === farmCode && o.talhao === talhao);
-  } else {
-    list = OCC.filter(o => o.farmCode === farmCode);
-  }
-
-  list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  const wrap = document.getElementById("occList");
-  if (!wrap) return;
-
-  if (list.length === 0) {
-    wrap.innerHTML = `<div class="muted" style="margin-top:10px;">Nenhuma ocorrência registrada ainda.</div>`;
-    return;
-  }
-
-  wrap.innerHTML = list.map(o => {
-    const where = o.scope === "talhao" ? `Talhão ${o.talhao}` : "Fazenda";
-    const pr = (o.pragas || []).map(x => `<span class="tag">${escapeHtml(x)}</span>`).join("");
-    const mt = (o.matos || []).map(x => `<span class="tag">${escapeHtml(x)}</span>`).join("");
-
-    const fotos = (o.photos || []).length
-      ? `<div class="thumbs">` +
-        (o.photos || []).slice(0, 3).map((p, idx) =>
-          `<img class="thumb" src="${p}" title="Abrir" onclick="window.__openPhotoViewer('${o.id}', ${idx})" />`
-        ).join("") +
-        ((o.photos || []).length > 3 ? `<div class="thumb-more" onclick="window.__openPhotoViewer('${o.id}', 0)">+${(o.photos || []).length - 3}</div>` : "") +
-        `</div>`
-      : "";
-
-    const dt = new Date(o.date || o.createdAt || Date.now());
-    const dtStr = dt.toLocaleDateString("pt-BR");
-
-    return `
-      <div class="occ-item">
-        <div class="occ-head">
-          <div><b>${escapeHtml(o.cultura || "—")}</b> • ${where} • <span class="small">${dtStr}</span></div>
-          ${statusBadge(o.status)}
-        </div>
-
-        <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
-        ${o.pragas?.length ? `<div class="small" style="margin-top:6px;"><b>Pragas:</b> ${pr}</div>` : ``}
-        ${o.matos?.length ? `<div class="small" style="margin-top:6px;"><b>Matos:</b> ${mt}</div>` : ``}
-        ${fotos}
-
-        <div class="row" style="margin-top:8px;">
-          <select data-id="${o.id}" class="statusSel" style="flex:1;">
-            <option value="Pendente" ${o.status === "Pendente" ? "selected" : ""}>Pendente</option>
-            <option value="Em andamento" ${o.status === "Em andamento" ? "selected" : ""}>Em andamento</option>
-            <option value="Feito" ${o.status === "Feito" ? "selected" : ""}>Feito</option>
-          </select>
-          <button class="secondary" data-id="${o.id}" onclick="window.__editOcc('${o.id}')">Editar</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  wrap.querySelectorAll(".statusSel").forEach(sel => {
-    sel.onchange = async () => {
-      const id = sel.getAttribute("data-id");
-      const next = sel.value;
-
-      if (next === "Feito" && getProfile() !== "master") {
-        alert("Só Master pode finalizar como FEITO.");
-        sel.value = "Em andamento";
-        return;
-      }
-
-      const idx = OCC.findIndex(o => o.id === id);
-      if (idx < 0) return;
-
-      // se for FEITO, exige texto
-      if (next === "Feito") {
-        openModal({
-          title: "Finalizar ocorrência",
-          sub: "Para marcar como FEITO, descreva o que foi feito (obrigatório).",
-          bodyHtml: `<label>O que foi feito *</label><textarea id="doneText" placeholder="Ex: Aplicado X, dose Y, data..."></textarea>`,
-          onSave: async () => {
-            const txt = document.getElementById("doneText").value.trim();
-            if (!txt) { alert("Campo obrigatório: o que foi feito."); return false; }
-
-            OCC[idx].status = "Feito";
-            OCC[idx].doneText = txt;
-            OCC[idx].doneAt = Date.now();
-
-            await upsertOccSupabase(OCC[idx]);
-            saveOccLocal(OCC);
-            refreshCurrentCard();
-            refreshMapStyles();
-            return true;
-          }
-        });
-
-        sel.value = "Em andamento";
-        return;
-      }
-
-      OCC[idx].status = next;
-
-      await upsertOccSupabase(OCC[idx]);
-      saveOccLocal(OCC);
-      refreshCurrentCard();
-      refreshMapStyles();
-    };
-  });
+function getProfileLabel(){
+  return isMaster() ? "master" : "user";
 }
 
 // =============================
-// Photo viewer + Pend report
-// =============================
-window.__openPhotoViewer = (occId, startIdx = 0) => {
-  const occ = OCC.find(o => o.id === occId);
-  if (!occ || !occ.photos || !occ.photos.length) return;
-
-  let i = Math.max(0, Math.min(startIdx, occ.photos.length - 1));
-  const render = () => {
-    const img = occ.photos[i];
-    const bodyHtml = `
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div class="small">Foto ${i + 1} de ${occ.photos.length}</div>
-        <div style="display:flex;justify-content:center;">
-          <img src="${img}" style="max-width:100%;max-height:70vh;border-radius:12px;border:1px solid #e5e7eb;" />
-        </div>
-        <div class="row">
-          <button class="secondary" id="pvPrev">⬅️ Anterior</button>
-          <button class="secondary" id="pvNext">Próxima ➡️</button>
-        </div>
-      </div>`;
-
-    openModal({
-      title: "Fotos da ocorrência",
-      sub: `${occ.farmCode} — ${occ.farmName}` + (occ.scope === "talhao" ? ` • Talhão ${occ.talhao}` : ""),
-      bodyHtml,
-      onSave: null
-    });
-
-    setTimeout(() => {
-      const prev = document.getElementById("pvPrev");
-      const next = document.getElementById("pvNext");
-      if (prev) prev.onclick = () => { i = (i - 1 + occ.photos.length) % occ.photos.length; render(); };
-      if (next) next.onclick = () => { i = (i + 1) % occ.photos.length; render(); };
-    }, 0);
-  };
-
-  render();
-};
-
-window.__openPendReport = (farmCode) => {
-  const farm = farms.get(farmCode);
-  if (!farm) return;
-
-  const all = OCC.filter(o => o.farmCode === farmCode);
-  const pend = all.filter(o => o.status !== "Feito");
-
-  const groups = new Map();
-  for (const o of pend) {
-    const key = o.scope === "talhao" ? `Talhão ${o.talhao}` : "Fazenda (geral)";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(o);
-  }
-
-  const rows = [...groups.entries()].map(([k, arr]) => {
-    arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    const items = arr.slice(0, 10).map(o => {
-      const dt = new Date(o.date || o.createdAt || Date.now()).toLocaleDateString("pt-BR");
-      return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:8px;margin-top:6px;">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
-          <div><b>${escapeHtml(o.cultura || "—")}</b> • <span class="small">${dt}</span></div>
-          ${statusBadge(o.status)}
-        </div>
-        <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
-      </div>`;
-    }).join("");
-
-    return `<div style="margin-top:12px;">
-      <div style="font-weight:700;">${escapeHtml(k)} <span class="small">(${arr.length})</span></div>
-      ${items}
-    </div>`;
-  }).join("");
-
-  const body = `
-    <div>
-      <div class="small">Pendências = ocorrências em <b>Pendente</b> ou <b>Em andamento</b>.</div>
-      <div style="margin-top:10px;">
-        <div class="row">
-          <div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px;">
-            <div class="small">Total pendências</div>
-            <div style="font-size:22px;font-weight:800;">${pend.length}</div>
-          </div>
-          <div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px;">
-            <div class="small">Talhões com pendência</div>
-            <div style="font-size:22px;font-weight:800;">${[...groups.keys()].filter(x => x.startsWith("Talhão")).length}</div>
-          </div>
-        </div>
-        ${rows || '<div class="muted" style="margin-top:10px;">Nenhuma pendência 🎉</div>'}
-      </div>
-    </div>`;
-
-  openModal({ title: "Relatório de pendências", sub: `Fazenda ${farmCode} — ${farm.name}`, bodyHtml: body, onSave: null });
-};
-
-window.__editOcc = (id) => {
-  const occ = OCC.find(o => o.id === id);
-  if (!occ) return;
-  openOccForm({ scope: occ.scope, farmCode: occ.farmCode, farmName: occ.farmName, talhao: occ.talhao, existing: occ });
-};
-
-// =============================
-// Form
-// =============================
-function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
-  const isEdit = !!existing;
-  const title = isEdit ? "Editar ocorrência" : "Nova ocorrência";
-  const sub = scope === "talhao"
-    ? `Fazenda ${farmCode} — ${farmName} • Talhão ${talhao}`
-    : `Fazenda ${farmCode} — ${farmName}`;
-
-  const culturaVal = existing?.cultura || "Cana";
-  const pragasVal = (existing?.pragas || []).join(", ");
-  const matosVal = (existing?.matos || []).join(", ");
-  const obsVal = existing?.observacao || "";
-  const dateVal = existing?.date ? new Date(existing.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-  const statusVal = existing?.status || "Pendente";
-
-  const scopeExtra = scope === "fazenda" ? `
-    <label>Aplicar a</label>
-    <select id="farmApply">
-      <option value="geral" ${existing?.farmApply === "geral" ? "selected" : ""}>Geral da fazenda (sem talhão)</option>
-      <option value="todos" ${existing?.farmApply === "todos" ? "selected" : ""}>Todos os talhões da fazenda</option>
-      <option value="selecionar" ${existing?.farmApply === "selecionar" ? "selected" : ""}>Talhões selecionados (digitar)</option>
-    </select>
-    <div id="farmApplyTalhoesWrap" style="display:none;">
-      <label>Talhões (separar por vírgula)</label>
-      <input id="farmApplyTalhoes" placeholder="Ex: 2406, 2407, 2410" value="${escapeHtml((existing?.farmApplyTalhoes || []).join(", "))}"/>
-    </div>
-  ` : "";
-
-  openModal({
-    title,
-    sub,
-    bodyHtml: `
-      <label>Cultura</label>
-      <input id="cultura" value="${escapeHtml(culturaVal)}" placeholder="Ex: Cana, Soja..."/>
-
-      <label>Pragas (separar por vírgula)</label>
-      <input id="pragas" value="${escapeHtml(pragasVal)}" placeholder="Ex: mosca-branca, cigarrinha"/>
-
-      <label>Matos (separar por vírgula)</label>
-      <input id="matos" value="${escapeHtml(matosVal)}" placeholder="Ex: buva, capim-colchão"/>
-
-      <label>Observação *</label>
-      <textarea id="obs" placeholder="Descreva o que viu no campo...">${escapeHtml(obsVal)}</textarea>
-
-      <label>Data</label>
-      <input id="date" type="date" value="${dateVal}"/>
-
-      <label>Status</label>
-      <select id="status">
-        <option value="Pendente" ${statusVal === "Pendente" ? "selected" : ""}>Pendente</option>
-        <option value="Em andamento" ${statusVal === "Em andamento" ? "selected" : ""}>Em andamento</option>
-        <option value="Feito" ${statusVal === "Feito" ? "selected" : ""}>Feito</option>
-      </select>
-
-      <label>Fotos (opcional)</label>
-      <input id="photos" type="file" multiple accept="image/*"/>
-
-      ${scopeExtra}
-      <div class="small" style="margin-top:8px;">Dica: fotos muito grandes podem demorar para subir. Use poucas ou imagens leves.</div>
-    `,
-    onSave: async () => {
-      const cultura = document.getElementById("cultura").value.trim();
-      const pragas = document.getElementById("pragas").value.split(",").map(s => s.trim()).filter(Boolean);
-      const matos = document.getElementById("matos").value.split(",").map(s => s.trim()).filter(Boolean);
-      const obs = document.getElementById("obs").value.trim();
-      const date = document.getElementById("date").value;
-      let status = document.getElementById("status").value;
-
-      if (status === "Feito" && getProfile() !== "master") {
-        alert("Só Master pode finalizar como FEITO.");
-        status = "Pendente";
-      }
-      if (!obs) {
-        alert("Observação é obrigatória.");
-        return false;
-      }
-
-      const occId = existing?.id || uid();
-
-      // fotos -> urls
-      const files = [...(document.getElementById("photos").files || [])].slice(0, 6);
-      let photos = existing?.photos?.length ? [...existing.photos] : [];
-      if (files.length) {
-        const { urls, errors } = await uploadPhotosToSupabase({
-          files,
-          farmCode,
-          talhao: scope === "talhao" ? talhao : null,
-          occId
-        });
-        photos = photos.concat(urls);
-
-        if (errors.length) {
-          console.warn("Erros no upload:", errors);
-          alert("Algumas fotos podem não ter subido. Veja o console (F12).");
-        }
-      }
-
-      const recordBase = {
-        id: occId,
-        scope,
-        farmCode,
-        farmName,
-        talhao: scope === "talhao" ? talhao : null,
-        cultura,
-        pragas,
-        matos,
-        observacao: obs,
-        date: date ? Date.parse(date) : Date.now(),
-        status,
-        photos,
-        createdAt: existing?.createdAt || Date.now(),
-      };
-
-      // ====== FAZENDA ======
-      if (scope === "fazenda") {
-        const apply = document.getElementById("farmApply").value;
-
-        // ocorrência geral (sem replicar)
-        if (apply === "geral") {
-          const rec = { ...recordBase, scope: "fazenda", talhao: null, farmApply: "geral", farmApplyTalhoes: [] };
-
-          const { error } = await upsertOccSupabase(rec);
-          if (error) {
-            console.warn("❌ Supabase upsert falhou (fazenda/geral):", error);
-            alert("⚠️ Não consegui salvar no Supabase. Vou salvar local pra não perder (F12 p/ ver).");
-          }
-
-          // atualiza cache local
-          const idx = OCC.findIndex(o => o.id === rec.id);
-          if (idx >= 0) OCC[idx] = rec; else OCC.unshift(rec);
-          saveOccLocal(OCC);
-
-          refreshCurrentCard();
-          refreshMapStyles();
-          return true;
-        }
-
-        // replicar em talhões
-        const farm = farms.get(farmCode);
-        const talhoesDaFazenda = (farm?.features || [])
-          .map(f => {
-            const inf2 = (f.properties?.["INF."] ?? f.properties?.INF ?? "").toString();
-            const parsed = parseFarmName(inf2);
-            return parsed.talhao;
-          })
-          .filter(Boolean);
-
-        let alvo = [];
-        if (apply === "todos") {
-          alvo = talhoesDaFazenda;
-        } else {
-          const t = document.getElementById("farmApplyTalhoes").value
-            .split(",")
-            .map(s => s.trim())
-            .filter(Boolean);
-          const setTalhoes = new Set(talhoesDaFazenda);
-          alvo = t.filter(x => setTalhoes.has(x));
-        }
-
-        if (!alvo.length) {
-          alert("Nenhum talhão válido selecionado para aplicar.");
-          return false;
-        }
-
-        const groupId = existing?.groupId || uid();
-        // remove do cache as ocorrências antigas do grupo
-        OCC = OCC.filter(o => o.groupId !== groupId);
-
-        const baseCreatedAt = existing?.createdAt || Date.now();
-
-        const novos = alvo.map(tal => ({
-          ...recordBase,
-          id: uid(),
-          groupId,
-          scope: "talhao",
-          talhao: tal,
-          createdAt: baseCreatedAt,
-          fromFarm: true,
-          farmApply: apply,
-        }));
-
-        // salva um por um no Supabase
-        for (const rec of novos) {
-          const { error } = await upsertOccSupabase(rec);
-          if (error) console.warn("❌ upsert talhão replicado:", error);
-        }
-
-        OCC = novos.concat(OCC);
-        saveOccLocal(OCC);
-
-        refreshCurrentCard();
-        refreshMapStyles();
-        return true;
-      }
-
-      // ====== TALHÃO normal ======
-      const { error } = await upsertOccSupabase(recordBase);
-      if (error) {
-        console.warn("❌ Supabase upsert falhou (talhão):", error);
-        alert("⚠️ Não consegui salvar no Supabase. Vou salvar local pra não perder (F12 p/ ver).");
-      }
-
-      const idx = OCC.findIndex(o => o.id === recordBase.id);
-      if (idx >= 0) OCC[idx] = recordBase; else OCC.unshift(recordBase);
-      saveOccLocal(OCC);
-
-      refreshCurrentCard();
-      refreshMapStyles();
-      return true;
-    }
-  });
-
-  if (scope === "fazenda") {
-    const applySel = document.getElementById("farmApply");
-    const wrap = document.getElementById("farmApplyTalhoesWrap");
-    const sync = () => {
-      wrap.style.display = applySel.value === "selecionar" ? "block" : "none";
-    };
-    applySel.onchange = sync;
-    sync();
-  }
-}
-
-// =============================
-// Rendering and map logic
+// UI: Ocorrências (agora do DB)
 // =============================
 let currentFarmCode = "";
 let currentSelectedFeature = null;
@@ -877,36 +392,452 @@ function setFarmLabel(farmCode, bounds) {
   farmLabelMarker = L.marker(center, { icon, interactive: false }).addTo(map);
 }
 
-function refreshCurrentCard() {
+async function refreshCurrentCard() {
   const mode = getMode();
   if (mode === "talhao" && currentSelectedFeature) {
-    renderTalhaoCard(currentSelectedFeature);
+    await renderTalhaoCard(currentSelectedFeature);
   } else if (mode === "fazenda" && currentFarmCode) {
-    renderFarmCard(currentFarmCode);
+    await renderFarmCard(currentFarmCode);
   }
 }
 
-function refreshMapStyles() {
-  if (!geoLayer) return;
-  geoLayer.eachLayer(layer => {
+async function renderTalhaoCard(feature) {
+  const props = feature.properties || {};
+  const layerId = (props.LAYER ?? "").toString();
+  const inf = (props["INF."] ?? props.INF ?? "").toString();
+  const { farmCode, farmName, talhao } = parseFarmName(inf);
+
+  // garante cache da fazenda
+  await fetchOccByFarm(farmCode);
+
+  const chave = chaveFromProps(props);
+  const prod = prod2025[chave] || {};
+  let areaHa = null;
+  try { areaHa = turf.area(feature) / 10000.0; } catch (e) {}
+
+  const status = computeStatusForTalhaoFromCache(farmCode, talhao);
+
+  const card = document.getElementById("infoCard");
+  card.innerHTML = `
+    <div class="topline">
+      <span class="pill"><b>COD</b> ${layerId || "—"}</span>
+      <span class="pill"><b>Fazenda</b> ${farmCode || "—"} — ${farmName || "—"}</span>
+      <span class="pill"><b>Talhão</b> ${talhao || props.TALHAO || "—"}</span>
+      <span class="pill"><b>Status</b> ${status}</span>
+      <span class="pill"><b>Perfil</b> ${getProfileLabel()}</span>
+      <a class="pill" href="./dashboard.html">📊 Dashboard</a>
+    </div>
+
+    <div class="grid">
+      <div><div class="k">Área (ha)</div><div class="v">${formatNum(areaHa, 2)}</div></div>
+      <div><div class="k">Cultura / Safra</div><div class="v">Cana / 2025</div></div>
+      <div><div class="k">TCH 2025</div><div class="v">${formatNum(prod.tch, 1)}</div></div>
+      <div><div class="k">ATR 2025</div><div class="v">${formatNum(prod.atr, 1)}</div></div>
+    </div>
+
+    <div class="occ">
+      <div class="row">
+        <button id="btnNewOcc">+ Criar Ocorrência (Talhão)</button>
+        <button class="secondary" id="btnRefreshOcc">Atualizar</button>
+        <button class="secondary" id="btnLogout">Sair</button>
+      </div>
+      <div class="small" style="margin-top:8px;">“Feito” e “Cancelar” só Master.</div>
+      <div id="occList"></div>
+    </div>
+  `;
+
+  document.getElementById("btnNewOcc").onclick = () => openOccForm({ farmCode, farmName, talhao });
+  document.getElementById("btnRefreshOcc").onclick = async () => {
+    await fetchOccByFarm(farmCode);
+    await renderOccList({ farmCode, talhao });
+  };
+  document.getElementById("btnLogout").onclick = async () => {
+    await sb.auth.signOut();
+    window.location.href = "./login.html";
+  };
+
+  await renderOccList({ farmCode, talhao });
+}
+
+async function renderFarmCard(farmCode) {
+  const farm = farms.get(farmCode);
+  if (!farm) return;
+
+  await fetchOccByFarm(farmCode);
+
+  const status = computeStatusForFarmFromCache(farmCode);
+
+  let totalHa = 0;
+  let sumTch = 0, sumAtr = 0, sumW = 0;
+  farm.features.forEach(f => {
+    let ha = 0;
+    try { ha = turf.area(f) / 10000.0; } catch (e) {}
+    totalHa += ha;
+    const key = chaveFromProps(f.properties || {});
+    const p = prod2025[key];
+    if (p && (p.tch != null || p.atr != null)) {
+      sumW += ha;
+      if (p.tch != null) sumTch += ha * p.tch;
+      if (p.atr != null) sumAtr += ha * p.atr;
+    }
+  });
+  const tchMed = sumW ? (sumTch / sumW) : null;
+  const atrMed = sumW ? (sumAtr / sumW) : null;
+
+  const card = document.getElementById("infoCard");
+  card.innerHTML = `
+    <div class="topline">
+      <span class="pill"><b>Fazenda</b> ${farmCode} — ${farm.name}</span>
+      <span class="pill"><b>Status</b> ${status}</span>
+      <span class="pill"><b>Talhões</b> ${farm.features.length}</span>
+      <span class="pill"><b>Perfil</b> ${getProfileLabel()}</span>
+      <a class="pill" href="./dashboard.html">📊 Dashboard</a>
+    </div>
+
+    <div class="grid">
+      <div><div class="k">Área total (ha)</div><div class="v">${formatNum(totalHa, 2)}</div></div>
+      <div><div class="k">Cultura / Safra</div><div class="v">Cana / 2025</div></div>
+      <div><div class="k">TCH médio 2025</div><div class="v">${formatNum(tchMed, 1)}</div></div>
+      <div><div class="k">ATR médio 2025</div><div class="v">${formatNum(atrMed, 1)}</div></div>
+    </div>
+
+    <div class="occ">
+      <div class="row">
+        <button id="btnNewOccFarm">+ Criar Ocorrência (Fazenda)</button>
+        <button class="secondary" id="btnPendReport">Pendências</button>
+        <button class="secondary" id="btnRefreshOccFarm">Atualizar</button>
+        <button class="secondary" id="btnLogout">Sair</button>
+      </div>
+      <div class="small" style="margin-top:8px;">“Feito” e “Cancelar” só Master.</div>
+      <div id="occList"></div>
+    </div>
+  `;
+
+  document.getElementById("btnNewOccFarm").onclick = () => openOccForm({ farmCode, farmName: farm.name, talhao: null });
+  document.getElementById("btnRefreshOccFarm").onclick = async () => {
+    await fetchOccByFarm(farmCode);
+    await renderOccList({ farmCode, talhao: null });
+  };
+  document.getElementById("btnPendReport").onclick = () => openPendReport(farmCode);
+  document.getElementById("btnLogout").onclick = async () => {
+    await sb.auth.signOut();
+    window.location.href = "./login.html";
+  };
+
+  await renderOccList({ farmCode, talhao: null });
+}
+
+async function renderOccList({ farmCode, talhao }) {
+  farmCode = normalizeFarmCode(farmCode);
+  const rows = OCC_CACHE_BY_FARM.get(farmCode) || [];
+
+  let list = rows.filter(o => !o.cancelada);
+  if (talhao !== null && talhao !== undefined) {
+    list = list.filter(o => String(o.talhao || "") === String(talhao || ""));
+  }
+
+  list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  const wrap = document.getElementById("occList");
+  if (!wrap) return;
+
+  if (!list.length) {
+    wrap.innerHTML = `<div class="muted" style="margin-top:10px;">Nenhuma ocorrência registrada ainda.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = list.map(o => {
+    const where = o.talhao ? `Talhão ${escapeHtml(o.talhao)}` : "Fazenda";
+    const pr = (o.pragas || []).map(x => `<span class="tag">${escapeHtml(x)}</span>`).join("");
+    const mt = (o.matos || []).map(x => `<span class="tag">${escapeHtml(x)}</span>`).join("");
+
+    const fotos = (o.photos || []).length
+      ? `<div class="thumbs">` +
+        (o.photos || []).slice(0, 3).map((p, idx) =>
+          `<img class="thumb" src="${p}" title="Abrir" onclick="window.__openPhotoViewer('${o.id}', ${idx})" />`
+        ).join("") +
+        ((o.photos || []).length > 3 ? `<div class="thumb-more" onclick="window.__openPhotoViewer('${o.id}', 0)">+${(o.photos || []).length - 3}</div>` : "") +
+        `</div>`
+      : "";
+
+    const dtStr = new Date(o.created_at).toLocaleString("pt-BR");
+
+    const canCancel = isMaster();
+    const cancelBtn = canCancel ? `<button class="secondary" onclick="window.__cancelOcc('${o.id}')">Cancelar</button>` : ``;
+
+    return `
+      <div class="occ-item">
+        <div class="occ-head">
+          <div><b>${escapeHtml(o.cultura || "—")}</b> • ${where} • <span class="small">${dtStr}</span></div>
+          ${statusBadge(o.status)}
+        </div>
+
+        <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
+        ${o.pragas?.length ? `<div class="small" style="margin-top:6px;"><b>Pragas:</b> ${pr}</div>` : ``}
+        ${o.matos?.length ? `<div class="small" style="margin-top:6px;"><b>Matos:</b> ${mt}</div>` : ``}
+        ${fotos}
+
+        <div class="row" style="margin-top:8px;">
+          <select data-id="${o.id}" class="statusSel" style="flex:1;">
+            <option value="Pendente" ${o.status === "Pendente" ? "selected" : ""}>Pendente</option>
+            <option value="Em andamento" ${o.status === "Em andamento" ? "selected" : ""}>Em andamento</option>
+            <option value="Feito" ${o.status === "Feito" ? "selected" : ""}>Feito</option>
+          </select>
+          ${cancelBtn}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  wrap.querySelectorAll(".statusSel").forEach(sel => {
+    sel.onchange = async () => {
+      const id = sel.getAttribute("data-id");
+      const next = sel.value;
+
+      if (next === "Feito" && !isMaster()) {
+        alert("Só Master pode finalizar como FEITO.");
+        sel.value = "Em andamento";
+        return;
+      }
+
+      try{
+        await updateOccStatus({ id, status: next });
+        await fetchOccByFarm(farmCode);
+        await fetchFarmStatuses();
+        await refreshCurrentCard();
+        repaintMapColors();
+      }catch(e){
+        alert("Erro ao atualizar status: " + (e?.message || e));
+        console.error(e);
+      }
+    };
+  });
+}
+
+window.__openPhotoViewer = (occId, startIdx = 0) => {
+  const all = [];
+  for(const arr of OCC_CACHE_BY_FARM.values()) all.push(...arr);
+  const occ = all.find(o => o.id === occId);
+  if (!occ || !occ.photos || !occ.photos.length) return;
+
+  let i = Math.max(0, Math.min(startIdx, occ.photos.length - 1));
+  const render = () => {
+    const img = occ.photos[i];
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="small">Foto ${i + 1} de ${occ.photos.length}</div>
+        <div style="display:flex;justify-content:center;">
+          <img src="${img}" style="max-width:100%;max-height:70vh;border-radius:12px;border:1px solid #e5e7eb;" />
+        </div>
+        <div class="row">
+          <button class="secondary" id="pvPrev">⬅️ Anterior</button>
+          <button class="secondary" id="pvNext">Próxima ➡️</button>
+        </div>
+      </div>`;
+    openModal({
+      title: "Fotos da ocorrência",
+      sub: `Fazenda ${escapeHtml(occ.farm_code || "—")}` + (occ.talhao ? ` • Talhão ${escapeHtml(occ.talhao)}` : ""),
+      bodyHtml,
+      onSave: null
+    });
+    setTimeout(() => {
+      const prev = document.getElementById("pvPrev");
+      const next = document.getElementById("pvNext");
+      if (prev) prev.onclick = () => { i = (i - 1 + occ.photos.length) % occ.photos.length; render(); };
+      if (next) next.onclick = () => { i = (i + 1) % occ.photos.length; render(); };
+    }, 0);
+  };
+  render();
+};
+
+window.__cancelOcc = async (id) => {
+  if(!confirm("Cancelar essa ocorrência? (fica no histórico como cancelada)")) return;
+  try{
+    const farmCode = currentFarmCode;
+    await cancelOcc({ id });
+    await fetchOccByFarm(farmCode);
+    await fetchFarmStatuses();
+    await refreshCurrentCard();
+    repaintMapColors();
+  }catch(e){
+    alert("Erro ao cancelar: " + (e?.message || e));
+    console.error(e);
+  }
+};
+
+function openPendReport(farmCode){
+  const rows = (OCC_CACHE_BY_FARM.get(normalizeFarmCode(farmCode)) || [])
+    .filter(o => !o.cancelada && o.status !== "Feito");
+
+  const groups = new Map();
+  for (const o of rows) {
+    const key = o.talhao ? `Talhão ${o.talhao}` : "Fazenda (geral)";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(o);
+  }
+
+  const html = [...groups.entries()].map(([k, arr]) => {
+    arr.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+    const items = arr.slice(0, 12).map(o => {
+      const dt = new Date(o.created_at).toLocaleString("pt-BR");
+      return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:8px;margin-top:6px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div><b>${escapeHtml(o.cultura||"—")}</b> • <span class="small">${dt}</span></div>
+          ${statusBadge(o.status)}
+        </div>
+        <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
+      </div>`;
+    }).join("");
+
+    return `<div style="margin-top:12px;">
+      <div style="font-weight:700;">${escapeHtml(k)} <span class="small">(${arr.length})</span></div>
+      ${items}
+    </div>`;
+  }).join("");
+
+  const body = `
+    <div>
+      <div class="small">Pendências = status <b>Pendente</b> ou <b>Em andamento</b> (não canceladas).</div>
+      <div style="margin-top:10px;">
+        <div class="row">
+          <div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px;">
+            <div class="small">Total pendências</div>
+            <div style="font-size:22px;font-weight:800;">${rows.length}</div>
+          </div>
+        </div>
+        ${html || '<div class="muted" style="margin-top:10px;">Nenhuma pendência 🎉</div>'}
+      </div>
+    </div>`;
+  openModal({ title: "Relatório de pendências", sub: `Fazenda ${farmCode}`, bodyHtml: body, onSave: null });
+}
+
+// =============================
+// FORM: CRIAR OCORRÊNCIA
+// =============================
+function openOccForm({ farmCode, farmName, talhao }) {
+  const title = "Nova ocorrência";
+  const sub = talhao
+    ? `Fazenda ${farmCode} — ${farmName} • Talhão ${talhao}`
+    : `Fazenda ${farmCode} — ${farmName}`;
+
+  openModal({
+    title,
+    sub,
+    bodyHtml: `
+      <label>Cultura</label>
+      <input id="cultura" value="Cana" placeholder="Ex: Cana, Soja..."/>
+
+      <label>Pragas (separar por vírgula)</label>
+      <input id="pragas" placeholder="Ex: mosca-branca, cigarrinha"/>
+
+      <label>Matos (separar por vírgula)</label>
+      <input id="matos" placeholder="Ex: buva, capim-colchão"/>
+
+      <label>Observação *</label>
+      <textarea id="obs" placeholder="Descreva o que viu no campo..."></textarea>
+
+      <label>Status</label>
+      <select id="status">
+        <option value="Pendente">Pendente</option>
+        <option value="Em andamento">Em andamento</option>
+        <option value="Feito">Feito</option>
+      </select>
+
+      <label>Fotos (opcional)</label>
+      <input id="photos" type="file" multiple accept="image/*"/>
+
+      <div class="small" style="margin-top:8px;">Dica: fotos grandes demoram. Suba poucas.</div>
+    `,
+    onSave: async () => {
+      try{
+        const cultura = document.getElementById("cultura").value.trim();
+        const pragas = document.getElementById("pragas").value.split(",").map(s => s.trim()).filter(Boolean);
+        const matos = document.getElementById("matos").value.split(",").map(s => s.trim()).filter(Boolean);
+        const obs = document.getElementById("obs").value.trim();
+        let status = document.getElementById("status").value;
+
+        if(!obs){
+          alert("Observação é obrigatória.");
+          return false;
+        }
+        if(status === "Feito" && !isMaster()){
+          alert("Só Master pode finalizar como FEITO.");
+          status = "Pendente";
+        }
+
+        const occId = uid();
+        const files = [...(document.getElementById("photos").files || [])].slice(0, 6);
+
+        let photos = [];
+        if(files.length){
+          const { urls, errors } = await uploadPhotosToSupabase({ files, farmCode, talhao, occId });
+          photos = urls;
+          if(errors.length){
+            console.warn("Erros no upload:", errors);
+            alert("Algumas fotos podem não ter subido. Veja o console (F12).");
+          }
+        }
+
+        const record = {
+          id: occId,
+          farmCode,
+          talhao: talhao ? String(talhao) : null,
+          cultura,
+          pragas,
+          matos,
+          observacao: obs,
+          status,
+          photos
+        };
+
+        await insertOccSupabaseFull(record);
+
+        await fetchOccByFarm(farmCode);
+        await fetchFarmStatuses();
+        await refreshCurrentCard();
+        repaintMapColors();
+
+        return true;
+      }catch(e){
+        alert("Erro ao salvar: " + (e?.message || e));
+        console.error(e);
+        return false;
+      }
+    }
+  });
+}
+
+// =============================
+// MAP / INIT
+// =============================
+function repaintMapColors(){
+  if(!geoLayer) return;
+  geoLayer.eachLayer(layer=>{
     const feature = layer.feature;
-    const props = feature.properties || {};
+    const props = feature?.properties || {};
     const inf = (props["INF."] ?? props.INF ?? "").toString();
     const { farmCode, talhao } = parseFarmName(inf);
-    const st = computeStatusForTalhao(farmCode, talhao);
 
-    let fillColor = "#60a5fa";
-    if (st === "Pendente") fillColor = "#f59e0b";
-    else if (st === "Em andamento") fillColor = "#9ca3af";
-    else if (st === "OK") fillColor = "#34d399";
-
-    layer.setStyle({ weight: 1, fillOpacity: 0.25, fillColor });
+    const mode = getMode();
+    if(mode === "fazenda"){
+      const st = computeStatusForFarmFromCache(farmCode);
+      let fillColor = "#34d399";
+      if (st === "Pendente") fillColor = "#f59e0b";
+      else if (st === "Em andamento") fillColor = "#9ca3af";
+      layer.setStyle({ weight: 1, fillOpacity: 0.20, fillColor });
+    }else{
+      const st = computeStatusForTalhaoFromCache(farmCode, talhao);
+      let fillColor = "#34d399";
+      if (st === "Pendente") fillColor = "#f59e0b";
+      else if (st === "Em andamento") fillColor = "#9ca3af";
+      layer.setStyle({ weight: 1, fillOpacity: 0.25, fillColor });
+    }
   });
 }
 
 async function init() {
-  // 1) carrega cache de ocorrências (Supabase -> fallback local)
-  await refreshOccCache();
+  await guardSession();
+  await fetchFarmStatuses();
 
   map = L.map('map');
   window.__leafletMap = map;
@@ -945,6 +876,60 @@ async function init() {
       select.appendChild(opt);
     });
 
+  function drawAllFarms(){
+    clearFarmLabel();
+    currentSelectedFeature = null;
+    currentFarmCode = "";
+
+    if (geoLayer) { geoLayer.remove(); }
+
+    const fc = { type: "FeatureCollection", features: geojson.features };
+
+    geoLayer = L.geoJSON(fc, {
+      style: (feature) => {
+        const props = feature.properties || {};
+        const inf = (props["INF."] ?? props.INF ?? "").toString();
+        const { farmCode, talhao } = parseFarmName(inf);
+
+        const mode = getMode();
+        let st = "OK";
+        if(mode === "fazenda") st = computeStatusForFarmFromCache(farmCode);
+        else st = computeStatusForTalhaoFromCache(farmCode, talhao);
+
+        let fillColor = "#34d399";
+        if (st === "Pendente") fillColor = "#f59e0b";
+        else if (st === "Em andamento") fillColor = "#9ca3af";
+        return { weight: 1, fillOpacity: 0.20, fillColor };
+      },
+      onEachFeature: (feature, layer) => {
+        layer.on('click', async () => {
+          const props = feature.properties || {};
+          const inf = (props["INF."] ?? props.INF ?? "").toString();
+          const { farmCode, farmName, talhao } = parseFarmName(inf);
+
+          const mode = getMode();
+
+          if (mode === "fazenda") {
+            currentFarmCode = farmCode;
+            await renderFarmCard(farmCode);
+          } else {
+            currentFarmCode = farmCode;
+            currentSelectedFeature = feature;
+            await renderTalhaoCard(feature);
+          }
+        });
+      }
+    }).addTo(map);
+
+    const b = geoLayer.getBounds();
+    map.fitBounds(b, { padding: [20, 20] });
+
+    const card = document.getElementById("infoCard");
+    card.innerHTML = `<div class="muted">Mapa geral carregado. Clique em um talhão para ver e criar ocorrências.</div>`;
+
+    setTimeout(() => map.invalidateSize(), 250);
+  }
+
   function drawFarm(code) {
     clearFarmLabel();
     currentSelectedFeature = null;
@@ -953,7 +938,7 @@ async function init() {
     if (geoLayer) { geoLayer.remove(); }
 
     if (!code || !farms.has(code)) {
-      card.innerHTML = `<div class="muted">Selecione uma fazenda.</div>`;
+      drawAllFarms();
       return;
     }
 
@@ -966,30 +951,27 @@ async function init() {
         const props = feature.properties || {};
         const inf = (props["INF."] ?? props.INF ?? "").toString();
         const { farmCode, talhao } = parseFarmName(inf);
-        const st = computeStatusForTalhao(farmCode, talhao);
 
-        let fillColor = "#60a5fa";
+        const st = computeStatusForTalhaoFromCache(farmCode, talhao);
+
+        let fillColor = "#34d399";
         if (st === "Pendente") fillColor = "#f59e0b";
         else if (st === "Em andamento") fillColor = "#9ca3af";
-        else if (st === "OK") fillColor = "#34d399";
 
         return { weight: 1, fillOpacity: 0.25, fillColor };
       },
       onEachFeature: (feature, layer) => {
-        layer.on('click', () => {
+        layer.on('click', async () => {
           const mode = getMode();
 
           if (mode === "fazenda") {
-            geoLayer.eachLayer(l => l.setStyle({ weight: 1, fillOpacity: 0.08 }));
-            layer.setStyle({ weight: 2, fillOpacity: 0.22 });
-
             const b = geoLayer.getBounds();
             map.fitBounds(b, { padding: [20, 20] });
             setFarmLabel(code, b);
-            renderFarmCard(code);
+            await renderFarmCard(code);
           } else {
             currentSelectedFeature = feature;
-            renderTalhaoCard(feature);
+            await renderTalhaoCard(feature);
 
             layer.setStyle({ weight: 3, fillOpacity: 0.25 });
             geoLayer.eachLayer(l => {
@@ -1013,28 +995,24 @@ async function init() {
     setTimeout(() => map.invalidateSize(), 250);
   }
 
-  select.addEventListener('change', async e => {
-    const code = e.target.value;
-    await refreshOccCache({ farmCode: code || null }); // carrega do supabase dessa fazenda
-    drawFarm(code);
-  });
-
+  select.addEventListener('change', e => drawFarm(e.target.value));
   document.getElementById("modeSelect").addEventListener('change', () => {
+    repaintMapColors();
     drawFarm(select.value);
   });
 
-  document.getElementById("profileSelect").addEventListener('change', () => {
-    refreshCurrentCard();
-  });
-
-  // FAB +
+  // FAB
   const fab = document.getElementById("fabAdd");
   if (fab) {
     fab.addEventListener("click", () => {
       const farmCode = currentFarmCode || document.getElementById("farmSelect")?.value;
-      if (!farmCode) { alert("Selecione uma fazenda primeiro."); return; }
+      if (!farmCode) {
+        alert("Selecione uma fazenda primeiro.");
+        return;
+      }
 
       const mode = getMode();
+
       if (mode === "talhao") {
         if (!currentSelectedFeature) {
           alert("No modo Talhão, clique em um talhão no mapa antes de criar ocorrência.");
@@ -1042,23 +1020,19 @@ async function init() {
         }
         const props = currentSelectedFeature.properties || {};
         const inf = (props["INF."] ?? props.INF ?? "").toString();
-        const { farmCode, farmName, talhao } = parseFarmName(inf);
-        openOccForm({ scope: "talhao", farmCode, farmName, talhao });
+        const parsed = parseFarmName(inf);
+        openOccForm({ farmCode: parsed.farmCode, farmName: parsed.farmName, talhao: parsed.talhao });
         return;
       }
 
       const farm = farms.get(farmCode);
       const farmName = farm?.name || "";
-      openOccForm({ scope: "fazenda", farmCode, farmName, talhao: null });
+      openOccForm({ farmCode, farmName, talhao: null });
     });
   }
 
-  const first = select.options[1]?.value;
-  if (first) {
-    select.value = first;
-    await refreshOccCache({ farmCode: first });
-    drawFarm(first);
-  }
+  // default: mapa geral
+  drawAllFarms();
 }
 
 init().catch(err => {
