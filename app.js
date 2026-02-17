@@ -75,7 +75,7 @@ async function guardSession() {
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
   if (!__session) {
-    window.location.href = "./login.html";
+    window.location.href = "/login.html";
     throw new Error("Sem sessão.");
   }
 
