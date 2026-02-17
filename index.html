@@ -169,7 +169,15 @@
       </footer>
     </div>
   </div>
-
+<script>
+  // ✅ Guard de login (se não tiver sessão, vai pro login)
+  (async () => {
+    if (!window.supabase) return;
+    const sb = window.supabase.createClient(window.__SUPABASE_URL, window.__SUPABASE_ANON_KEY);
+    const { data } = await sb.auth.getSession();
+    if (!data?.session) window.location.href = "./login.html";
+  })();
+</script>
   <!-- App -->
   <script src="./app.js"></script>
 
