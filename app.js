@@ -258,6 +258,15 @@ async function insertOccSupabaseFull(record) {
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
 const { data: u } = await sb.auth.getUser();
 const uid = u?.user?.id;
+  const displayName =
+  (__perfil?.nome || __perfil?.name || __user?.nome || __user?.name || u?.user?.email || "—");
+
+await sb
+  .from("usuarios")
+  .upsert(
+    [{ empresa_id: (__perfil?.empresa_id || EMPRESA_ID), user_id: uid, nome: displayName, role: (__user?.role || "user") }],
+    { onConflict: "user_id" }
+  );
   const payload = {
     id: record.id,
     empresa_id: empresa,
@@ -596,7 +605,7 @@ async function renderOccList({ farmCode, talhao }) {
         </div>
 
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
-        <div class="small" style="margin-top:6px; opacity:.8;"><b>Criado por:</b> ${_userNameById?.[o.created_by] || (o.created_by ? o.created_by.slice(0,8) : "—")}</div>
+       <div class="small" style="margin-top:6px; opacity:.8;"><b>Criado por:</b> ${_userNameById?.[o.created_by] || (o.created_by ? o.created_by.slice(0,8) : "—")}</div>
         ${o.pragas?.length ? `<div class="small" style="margin-top:6px;"><b>Pragas:</b> ${pr}</div>` : ``}
         ${o.matos?.length ? `<div class="small" style="margin-top:6px;"><b>Matos:</b> ${mt}</div>` : ``}
         ${fotos}
@@ -1027,7 +1036,7 @@ async function loadUserNameMap(createdByIds) {
 
   const { data, error } = await sb
     .from("usuarios")
-    .select("user_id, name")
+.select("user_id, nome")
     .in("user_id", ids);
 
   if (error) {
@@ -1037,7 +1046,7 @@ async function loadUserNameMap(createdByIds) {
 
   const map = {};
   for (const row of (data || [])) {
-    map[row.user_id] = row.name;
+   map[row.user_id] = row.nome;
   }
   return map;
 }
