@@ -254,7 +254,8 @@ function computeStatusForTalhaoFromCache(farmCode, talhao) {
 async function insertOccSupabaseFull(record) {
   assertSb();
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
-
+const { data: u } = await sb.auth.getUser();
+const uid = u?.user?.id;
   const payload = {
     id: record.id,
     empresa_id: empresa,
@@ -266,10 +267,9 @@ async function insertOccSupabaseFull(record) {
     observacao: record.observacao || null,
     status: normStatus(record.status || STATUS.PENDENTE),
     photos: record.photos || [],
-    created_by: __user.id,
-    cancelada: false
-  };
-
+    cancelada: false,
+    created_by: uid,
+    };
   const { data, error } = await sb
     .from("ocorrencias")
     .insert([payload])
