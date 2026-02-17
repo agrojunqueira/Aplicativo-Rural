@@ -1065,3 +1065,13 @@ if (!finalPerfil) {
 
 // usa finalPerfil no resto do app
 __perfil = finalPerfil;
+  return finalPerfil;
+}
+}
+init().catch(err => {
+  console.error(err);
+  const card = document.getElementById("infoCard");
+  if (card) {
+    card.innerHTML = '<div class="muted">Erro ao carregar. Veja o console.</div>';
+  }
+});
