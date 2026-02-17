@@ -26,17 +26,17 @@
     <div class="muted">Entre com email e senha. Se não tiver conta, cadastre.</div>
 
     <label>Email</label>
-    <input id="email" type="email" placeholder="seuemail@exemplo.com" />
+    <input id="email" type="email" placeholder="seuemail@exemplo.com" autocomplete="username" />
 
     <label>Senha</label>
-    <input id="pass" type="password" placeholder="••••••••" />
+    <input id="pass" type="password" placeholder="••••••••" autocomplete="current-password" />
 
     <label>Seu nome (no cadastro)</label>
     <input id="nome" type="text" placeholder="Ex: Zé Ramilton" />
 
     <div class="row">
-      <button class="secondary" id="btnSignup">Cadastrar</button>
-      <button id="btnLogin">Entrar</button>
+      <button class="secondary" id="btnSignup" type="button">Cadastrar</button>
+      <button id="btnLogin" type="button">Entrar</button>
     </div>
 
     <div class="msg" id="msg"></div>
@@ -45,7 +45,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script>
     const SUPABASE_URL = "https://kqsbjgqtplvooxnqcmft.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_b8R_PutuU4EUd3Tomdq7Bg_j-eqr-H7"; 
+    const SUPABASE_ANON_KEY = "sb_publishable_b8R_PutuU4EUd3Tomdq7Bg_j-eqr-H7";
     const EMPRESA_ID = "agrojunqueira";
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -56,17 +56,18 @@
       el.textContent = txt;
     };
 
-    async function ensureProfile(nome) {
+    async function ensureProfile(nomeDigitado) {
       const { data: userData, error: userError } = await sb.auth.getUser();
       if (userError) throw userError;
 
       const user = userData?.user;
       if (!user) throw new Error("Usuário não autenticado.");
 
+      // 🔥 AQUI é o ponto crítico: tem que ser "nome" (não "name")
       const payload = {
-        id: user.id,                // 🔥 precisa ser igual ao auth.uid()
+        id: user.id,
         empresa_id: EMPRESA_ID,
-        name: nome || user.email,   // alinhado com tabela
+        nome: (nomeDigitado && nomeDigitado.trim()) ? nomeDigitado.trim() : (user.email || "Usuário"),
         role: "user"
       };
 
@@ -75,38 +76,43 @@
         .upsert(payload, { onConflict: "id" });
 
       if (error) throw error;
+      return true;
     }
 
     document.getElementById("btnSignup").onclick = async () => {
-      try{
+      try {
         msg("Cadastrando...");
         const email = document.getElementById("email").value.trim();
         const pass = document.getElementById("pass").value.trim();
         const nome = document.getElementById("nome").value.trim();
 
-        if(!email || !pass) return msg("Preencha email e senha.");
+        if (!email || !pass) return msg("Preencha email e senha.");
 
         const { data, error } = await sb.auth.signUp({ email, password: pass });
         if (error) throw error;
 
+        // Em muitos casos o signUp NÃO cria session na hora (depende de confirmação de email)
         if (data?.session) {
           await ensureProfile(nome);
+          msg("Cadastro OK. Indo pro mapa...", true);
+          window.location.href = "./index.html";
+          return;
         }
 
-        msg("Cadastro realizado. Se necessário, confirme seu email.", true);
-      }catch(e){
+        msg("Cadastro realizado. Se o Supabase exigir, confirme seu email e depois faça login.", true);
+      } catch (e) {
         msg("Erro: " + (e?.message || e));
       }
     };
 
     document.getElementById("btnLogin").onclick = async () => {
-      try{
+      try {
         msg("Entrando...");
         const email = document.getElementById("email").value.trim();
         const pass = document.getElementById("pass").value.trim();
         const nome = document.getElementById("nome").value.trim();
 
-        if(!email || !pass) return msg("Preencha email e senha.");
+        if (!email || !pass) return msg("Preencha email e senha.");
 
         const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
         if (error) throw error;
@@ -115,14 +121,17 @@
 
         msg("Login OK. Indo pro mapa...", true);
         window.location.href = "./index.html";
-      }catch(e){
+      } catch (e) {
         msg("Erro: " + (e?.message || e));
       }
     };
 
-    (async ()=>{
-      const { data } = await sb.auth.getSession();
-      if (data?.session) window.location.href = "./index.html";
+    // Se já estiver logado, manda pro mapa
+    (async () => {
+      try {
+        const { data } = await sb.auth.getSession();
+        if (data?.session) window.location.href = "./index.html";
+      } catch (e) {}
     })();
   </script>
 </body>
