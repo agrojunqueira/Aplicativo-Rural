@@ -1038,16 +1038,33 @@ async function loadUserNameMap(createdByIds) {
   const ids = [...new Set((createdByIds || []).filter(Boolean))];
   if (!ids.length) return {};
 
-  const { data, error } = await sb
+ const { data: perfil, error } = await sb
+  .from("usuarios")
+  .select("nome, role, empresa_id, user_id")
+  .eq("user_id", __user.id)
+  .maybeSingle();
+
+if (error) throw error;
+
+let finalPerfil = perfil;
+
+// se não existir perfil, cria automaticamente
+if (!finalPerfil) {
+  const payload = {
+    user_id: __user.id,
+    empresa_id: EMPRESA_ID,
+    nome: __user.email || "Usuário",
+    role: "user",
+  };
+
+  const { data: novo, error: e2 } = await sb
     .from("usuarios")
-    .select("user_id, nome")
-    .in("user_id", ids);
+    .upsert([payload], { onConflict: "user_id" })
+    .select("nome, role, empresa_id, user_id")
+    .single();
 
-  if (error) throw error;
-
-  const map = {};
-  for (const row of (data || [])) {
-    map[row.user_id] = row.nome;
-  }
-  return map;
+  if (e2) throw e2;
+  finalPerfil = novo;
 }
+
+__perfil = finalPerfil;
