@@ -738,10 +738,12 @@ function openOccForm({ farmCode, farmName, talhao }) {
 
       <label>Status</label>
       <select id="status">
-        <option value="Pendente">Pendente</option>
-        <option value="Em andamento">Em andamento</option>
-        <option value="Feito">Feito</option>
-      </select>
+        <select id="status">
+  <option value="pendente">Pendente</option>
+  <option value="feita">Feita</option>
+  <option value="cancelada">Cancelada</option>
+</select>
+    
 
       <label>Fotos (opcional)</label>
       <input id="photos" type="file" multiple accept="image/*"/>
