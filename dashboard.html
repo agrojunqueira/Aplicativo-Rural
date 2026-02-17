@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aplicativo Rural — Dashboard</title>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#0b1220;color:#fff;}
+    header{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08);background:#0f172a;position:sticky;top:0}
+    a,button{color:#fff;text-decoration:none}
+    button{cursor:pointer;border:none;background:#2563eb;padding:10px 12px;border-radius:12px;font-weight:700}
+    button.secondary{background:transparent;border:1px solid rgba(255,255,255,.18)}
+    .wrap{max-width:980px;margin:0 auto;padding:16px}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+    @media (max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+    .card{background:#111827;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:14px}
+    .k{color:#9ca3af;font-size:12px}
+    .v{font-size:24px;font-weight:900;margin-top:6px}
+    .list{margin-top:14px}
+    .item{background:#0f172a;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:12px;margin-top:10px}
+    .muted{color:#9ca3af;font-size:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+    .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08);font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div style="font-weight:900;">Dashboard</div>
+      <div class="muted" id="who"></div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <a class="pill" href="./index.html">🗺️ Mapa</a>
+      <button class="secondary" id="btnLogout">Sair</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="grid">
+      <div class="card"><div class="k">Pendentes</div><div class="v" id="kPend">—</div></div>
+      <div class="card"><div class="k">Em andamento</div><div class="v" id="kAnd">—</div></div>
+      <div class="card"><div class="k">Feitas</div><div class="v" id="kFeito">—</div></div>
+      <div class="card"><div class="k">Canceladas</div><div class="v" id="kCanc">—</div></div>
+    </div>
+
+    <div class="list">
+      <div class="muted">Relatório de pendências (não canceladas) — últimas 30</div>
+      <div id="pendList"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    const SUPABASE_URL = window.__SUPABASE_URL || "https://kqsbjgqtplvooxnqcmft.supabase.co";
+    const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || "COLE_SUA_ANON_KEY_EYJ_AQUI";
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    async function guard(){
+      const { data } = await sb.auth.getSession();
+      if (!data?.session) window.location.href = "./login.html";
+      return data.session;
+    }
+
+    async function getPerfil(){
+      const { data: { user } } = await sb.auth.getUser();
+      const { data, error } = await sb.from("usuarios").select("nome, role, empresa_id").eq("id", user.id).single();
+      if (error) throw error;
+      return { user, perfil: data };
+    }
+
+    function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));}
+
+    async function load(){
+      await guard();
+      const { user, perfil } = await getPerfil();
+      document.getElementById("who").textContent = `${perfil.nome || user.email} • ${perfil.role} • ${perfil.empresa_id}`;
+
+      // KPIs
+      const { data: rows, error } = await sb
+        .from("ocorrencias")
+        .select("status, cancelada")
+        .order("created_at", { ascending: false })
+        .limit(5000);
+
+      if (error) throw error;
+
+      let pend=0,and=0,feito=0,canc=0;
+      for (const r of (rows||[])){
+        if (r.cancelada) {canc++; continue;}
+        if (r.status === "Pendente") pend++;
+        else if (r.status === "Em andamento") and++;
+        else if (r.status === "Feito") feito++;
+      }
+      document.getElementById("kPend").textContent = pend;
+      document.getElementById("kAnd").textContent = and;
+      document.getElementById("kFeito").textContent = feito;
+      document.getElementById("kCanc").textContent = canc;
+
+      // Lista pendências
+      const { data: pendRows, error: e2 } = await sb
+        .from("ocorrencias")
+        .select("id, farm_code, talhao, cultura, observacao, status, created_at")
+        .eq("cancelada", false)
+        .in("status", ["Pendente","Em andamento"])
+        .order("created_at", { ascending: false })
+        .limit(30);
+
+      if (e2) throw e2;
+
+      const wrap = document.getElementById("pendList");
+      if (!pendRows?.length){
+        wrap.innerHTML = `<div class="item"><b>🎉</b> Nenhuma pendência agora.</div>`;
+        return;
+      }
+      wrap.innerHTML = pendRows.map(o=>{
+        const dt = new Date(o.created_at).toLocaleString("pt-BR");
+        return `<div class="item">
+          <div class="row">
+            <div><b>${esc(o.cultura||"—")}</b> • <span class="muted">${dt}</span></div>
+            <div class="pill">${esc(o.status)}</div>
+          </div>
+          <div class="muted" style="margin-top:6px;">Fazenda ${esc(o.farm_code||"—")} ${o.talhao ? ("• Talhão "+esc(o.talhao)) : ""}</div>
+          <div style="margin-top:6px;">${esc(o.observacao||"—")}</div>
+        </div>`;
+      }).join("");
+    }
+
+    document.getElementById("btnLogout").onclick = async ()=>{
+      await sb.auth.signOut();
+      window.location.href = "./login.html";
+    };
+
+    load().catch(err=>{
+      alert("Erro no dashboard: " + (err?.message || err));
+      console.error(err);
+    });
+  </script>
+</body>
+</html>
