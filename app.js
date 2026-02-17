@@ -594,6 +594,7 @@ async function renderOccList({ farmCode, talhao }) {
         </div>
 
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
+        <div class="small" style="margin-top:6px; opacity:.8;"><b>Criado por:</b> ${o.created_by ? o.created_by.slice(0,8) : "—"}</div>
         ${o.pragas?.length ? `<div class="small" style="margin-top:6px;"><b>Pragas:</b> ${pr}</div>` : ``}
         ${o.matos?.length ? `<div class="small" style="margin-top:6px;"><b>Matos:</b> ${mt}</div>` : ``}
         ${fotos}
