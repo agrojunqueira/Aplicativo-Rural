@@ -196,6 +196,8 @@ async function fetchOccByFarm(farmCode) {
     .limit(2000);
 
   if (error) throw error;
+  const ids = (data || []).map(o => o.created_by);
+_userNameById = await loadUserNameMap(ids);
   OCC_CACHE_BY_FARM.set(farmCode, data || []);
   return data || [];
 }
@@ -594,7 +596,7 @@ async function renderOccList({ farmCode, talhao }) {
         </div>
 
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
-        <div class="small" style="margin-top:6px; opacity:.8;"><b>Criado por:</b> ${o.created_by ? o.created_by.slice(0,8) : "—"}</div>
+        <div class="small" style="margin-top:6px; opacity:.8;"><b>Criado por:</b> ${_userNameById?.[o.created_by] || (o.created_by ? o.created_by.slice(0,8) : "—")}</div>
         ${o.pragas?.length ? `<div class="small" style="margin-top:6px;"><b>Pragas:</b> ${pr}</div>` : ``}
         ${o.matos?.length ? `<div class="small" style="margin-top:6px;"><b>Matos:</b> ${mt}</div>` : ``}
         ${fotos}
@@ -1016,3 +1018,26 @@ init().catch(err => {
   const card = document.getElementById("infoCard");
   if (card) card.innerHTML = `<div class="muted">Erro ao carregar. Veja o console.</div>`;
 });
+let __userNameById = {};
+async function loadUserNameMap(createdByIds) {
+  assertSb();
+
+  const ids = [...new Set((createdByIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+
+  const { data, error } = await sb
+    .from("usuarios")
+    .select("user_id, name")
+    .in("user_id", ids);
+
+  if (error) {
+    console.warn("Falha ao buscar nomes em usuarios:", error);
+    return {};
+  }
+
+  const map = {};
+  for (const row of (data || [])) {
+    map[row.user_id] = row.name;
+  }
+  return map;
+}
