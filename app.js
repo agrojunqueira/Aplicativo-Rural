@@ -88,6 +88,7 @@ function escapeHtml(s) {
 let __session = null;
 let __user = null;
 let __perfil = null; // {nome, role, empresa_id}
+let __userNameById = {}; // created_by(user_id) -> nome
 
 async function guardSession() {
   assertSb();
@@ -106,23 +107,76 @@ async function guardSession() {
     throw new Error("Sem usuário.");
   }
 
+  // 1) tenta pegar perfil (SEM quebrar quando não existir)
   const { data: perfil, error } = await sb
     .from("usuarios")
-    .select("nome, role, empresa_id")
+    .select("nome, role, empresa_id, user_id")
     .eq("user_id", __user.id)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
 
-  __perfil = perfil;
+  // 2) se não existir, cria (upsert)
+  let finalPerfil = perfil;
+  if (!finalPerfil) {
+    const payload = {
+      user_id: __user.id,
+      empresa_id: EMPRESA_ID,
+      nome: __user.email || "Usuário",
+      role: "user",
+    };
+
+    const { data: novo, error: e2 } = await sb
+      .from("usuarios")
+      .upsert([payload], { onConflict: "user_id" })
+      .select("nome, role, empresa_id, user_id")
+      .single();
+
+    if (e2) throw e2;
+    finalPerfil = novo;
+  }
+
+  __perfil = finalPerfil;
+
   if (__perfil?.empresa_id && __perfil.empresa_id !== EMPRESA_ID) {
     console.warn("EMPRESA_ID no front diferente do perfil. Usando perfil:", __perfil.empresa_id);
   }
+
   return { user: __user, perfil: __perfil };
 }
 
 function isMaster() {
   return (__perfil?.role || "user") === "master";
+}
+
+function getProfileLabel() {
+  return isMaster() ? "master" : "user";
+}
+
+// =============================
+// NOMES (created_by -> nome)
+// =============================
+async function loadUserNameMap(createdByIds) {
+  assertSb();
+  const ids = [...new Set((createdByIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+
+  // Busca nomes dos usuários que criaram ocorrência
+  const empresa = __perfil?.empresa_id || EMPRESA_ID;
+
+  const { data, error } = await sb
+    .from("usuarios")
+    .select("user_id, nome, empresa_id")
+    .eq("empresa_id", empresa)
+    .in("user_id", ids);
+
+  if (error) throw error;
+
+  const out = {};
+  for (const r of (data || [])) {
+    out[r.user_id] = r.nome || r.user_id;
+  }
+  return out;
 }
 
 // =============================
@@ -196,8 +250,10 @@ async function fetchOccByFarm(farmCode) {
     .limit(2000);
 
   if (error) throw error;
+
   const ids = (data || []).map(o => o.created_by);
-__userNameById = await loadUserNameMap(ids);
+  __userNameById = await loadUserNameMap(ids);
+
   OCC_CACHE_BY_FARM.set(farmCode, data || []);
   return data || [];
 }
@@ -256,17 +312,26 @@ function computeStatusForTalhaoFromCache(farmCode, talhao) {
 async function insertOccSupabaseFull(record) {
   assertSb();
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
-const { data: u } = await sb.auth.getUser();
-const uid = u?.user?.id;
-  const displayName =
-  (__perfil?.nome || __perfil?.name || __user?.nome || __user?.name || u?.user?.email || "—");
 
-await sb
-  .from("usuarios")
-  .upsert(
-    [{ empresa_id: (__perfil?.empresa_id || EMPRESA_ID), user_id: uid, nome: displayName, role: (__user?.role || "user") }],
-    { onConflict: "user_id" }
-  );
+  const { data: u } = await sb.auth.getUser();
+  const userId = u?.user?.id || __user?.id;
+
+  // garante perfil do usuário (caso ele nunca tenha aberto o app)
+  const displayName =
+    (__perfil?.nome || __user?.email || "Usuário");
+
+  await sb
+    .from("usuarios")
+    .upsert(
+      [{
+        empresa_id: (__perfil?.empresa_id || EMPRESA_ID),
+        user_id: userId,
+        nome: displayName,
+        role: (__perfil?.role || "user")
+      }],
+      { onConflict: "user_id" }
+    );
+
   const payload = {
     id: record.id,
     empresa_id: empresa,
@@ -279,8 +344,9 @@ await sb
     status: normStatus(record.status || STATUS.PENDENTE),
     photos: record.photos || [],
     cancelada: false,
-    created_by: uid,
-    };
+    created_by: userId,
+  };
+
   const { data, error } = await sb
     .from("ocorrencias")
     .insert([payload])
@@ -312,6 +378,7 @@ async function cancelOcc({ id }) {
     return;
   }
   assertSb();
+
   const patch = {
     cancelada: true,
     cancelada_por: __user.id,
@@ -395,10 +462,6 @@ function openModal({ title, sub, bodyHtml, onSave }) {
 
 function getMode() {
   return document.getElementById("modeSelect")?.value || "talhao";
-}
-
-function getProfileLabel() {
-  return isMaster() ? "master" : "user";
 }
 
 // =============================
@@ -605,7 +668,7 @@ async function renderOccList({ farmCode, talhao }) {
         </div>
 
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
-       <div class="small" style="margin-top:6px; opacity:.8;"><b>Criado por:</b> ${_userNameById?.[o.created_by] || (o.created_by ? o.created_by.slice(0,8) : "—")}</div>
+        <div class="small" style="margin-top:6px; opacity:.8;"><b>Criado por:</b> ${__userNameById?.[o.created_by] || (o.created_by ? o.created_by.slice(0, 8) : "—")}</div>
         ${o.pragas?.length ? `<div class="small" style="margin-top:6px;"><b>Pragas:</b> ${pr}</div>` : ``}
         ${o.matos?.length ? `<div class="small" style="margin-top:6px;"><b>Matos:</b> ${mt}</div>` : ``}
         ${fotos}
@@ -1027,44 +1090,3 @@ init().catch(err => {
   const card = document.getElementById("infoCard");
   if (card) card.innerHTML = `<div class="muted">Erro ao carregar. Veja o console.</div>`;
 });
-// =============================
-// NOMES (created_by -> nome)
-// =============================
-let __userNameById = {};
-
-async function loadUserNameMap(createdByIds) {
-  assertSb();
-
-  const ids = [...new Set((createdByIds || []).filter(Boolean))];
-  if (!ids.length) return {};
-
- const { data: perfil, error } = await sb
-  .from("usuarios")
-  .select("nome, role, empresa_id, user_id")
-  .eq("user_id", __user.id)
-  .maybeSingle();
-
-if (error) throw error;
-
-let finalPerfil = perfil;
-
-// se não existir perfil, cria automaticamente
-if (!finalPerfil) {
-  const payload = {
-    user_id: __user.id,
-    empresa_id: EMPRESA_ID,
-    nome: __user.email || "Usuário",
-    role: "user",
-  };
-
-  const { data: novo, error: e2 } = await sb
-    .from("usuarios")
-    .upsert([payload], { onConflict: "user_id" })
-    .select("nome, role, empresa_id, user_id")
-    .single();
-
-  if (e2) throw e2;
-  finalPerfil = novo;
-}
-
-
