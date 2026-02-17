@@ -1027,51 +1027,27 @@ init().catch(err => {
   const card = document.getElementById("infoCard");
   if (card) card.innerHTML = `<div class="muted">Erro ao carregar. Veja o console.</div>`;
 });
+// =============================
+// NOMES (created_by -> nome)
+// =============================
 let __userNameById = {};
+
 async function loadUserNameMap(createdByIds) {
   assertSb();
 
   const ids = [...new Set((createdByIds || []).filter(Boolean))];
   if (!ids.length) return {};
 
- const { data: perfil, error } = await sb
-  .from("usuarios")
-  .select("nome, role, empresa_id")
-  .eq("user_id", user.id)
-  .maybeSingle();
-
-if (error) throw error;
-
-let finalPerfil = perfil;
-
-if (!finalPerfil) {
-  // cria automaticamente se não existir
-  const payload = {
-    user_id: user.id,
-    empresa_id: EMPRESA_ID,                 // ou o default que você usa
-    nome: user.email || "Usuário",
-    role: "user",
-  };
-
-  const { data: novo, error: e2 } = await sb
+  const { data, error } = await sb
     .from("usuarios")
-    .insert(payload)
-    .select("nome, role, empresa_id")
-    .single();
+    .select("user_id, nome")
+    .in("user_id", ids);
 
-  if (e2) throw e2;
-  finalPerfil = novo;
-}
+  if (error) throw error;
 
-// usa finalPerfil no resto do app
-__perfil = finalPerfil;
-  return finalPerfil;
-}
-}
-init().catch(err => {
-  console.error(err);
-  const card = document.getElementById("infoCard");
-  if (card) {
-    card.innerHTML = '<div class="muted">Erro ao carregar. Veja o console.</div>';
+  const map = {};
+  for (const row of (data || [])) {
+    map[row.user_id] = row.nome;
   }
-});
+  return map;
+}
