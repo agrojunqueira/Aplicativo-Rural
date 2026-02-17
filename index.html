@@ -141,20 +141,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
   <!-- Supabase (UMA vez só) -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 
-  <!-- CONFIG SUPABASE -->
+  <!-- CONFIG SUPABASE (NÃO PODE TER <script> DENTRO!) -->
   <script>
     window.__SUPABASE_URL = "https://kqsbjgqtplvooxnqcmft.supabase.co";
-
-    // COLE A "Anon Key (Legacy)" (eyJ...)
- <script>
-  window.__SUPABASE_URL = "https://kqsbjgqtplvooxnqcmft.supabase.co";
-  window.__SUPABASE_ANON_KEY = "sb_publishable_b8R_PutuU4EUd3Tomdq7Bg_j-eqr-H7";
-
-  window.__FOTOS_BUCKET = "ocorrencias-fotos";
-  window.__EMPRESA_ID = "agrojunqueira";
-</script>
+    window.__SUPABASE_ANON_KEY = "sb_publishable_b8R_PutuU4EUd3Tomdq7Bg_j-eqr-H7";
+    window.__FOTOS_BUCKET = "ocorrencias-fotos";
+    window.__EMPRESA_ID = "agrojunqueira";
+  </script>
 
   <!-- Modal -->
   <div class="modal-backdrop" id="modalBackdrop">
@@ -170,15 +165,34 @@
       </footer>
     </div>
   </div>
-<script>
-  // ✅ Guard de login (se não tiver sessão, vai pro login)
-  (async () => {
-    if (!window.supabase) return;
-    const sb = window.supabase.createClient(window.__SUPABASE_URL, window.__SUPABASE_ANON_KEY);
-    const { data } = await sb.auth.getSession();
-    if (!data?.session) window.location.href = "/login.html";l";
-  })();
-</script>
+
+  <!-- ✅ Guard de login: se não tiver sessão, vai pro login -->
+  <script>
+    (async () => {
+      try {
+        if (!window.supabase) return;
+
+        const url = window.__SUPABASE_URL;
+        const key = window.__SUPABASE_ANON_KEY;
+
+        if (!url || !key) {
+          console.warn("Supabase config ausente no index.html");
+          return;
+        }
+
+        const sb = window.supabase.createClient(url, key);
+        const { data, error } = await sb.auth.getSession();
+        if (error) console.warn(error);
+
+        if (!data?.session) {
+          window.location.href = "./login.html";
+        }
+      } catch (e) {
+        console.error("Guard login falhou:", e);
+      }
+    })();
+  </script>
+
   <!-- App -->
   <script src="./app.js"></script>
 
