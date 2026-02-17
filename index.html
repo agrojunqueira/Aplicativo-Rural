@@ -2,113 +2,194 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Aplicativo Rural — Login</title>
+
+  <!-- iPhone / PWA friendly -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#111827" />
+
+  <title>Aplicativo Rural — MVP</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
   <style>
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#0b1220;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px;}
-    .card{width:100%;max-width:420px;background:#111827;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:16px;box-shadow:0 16px 40px rgba(0,0,0,.35);}
-    h1{font-size:16px;margin:0 0 8px;}
-    .muted{color:#9ca3af;font-size:12px;line-height:1.4;margin-bottom:14px;}
-    label{font-size:12px;color:#cbd5e1;font-weight:600;display:block;margin:10px 0 6px;}
-    input,button{width:100%;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0b1220;color:#fff;font-size:14px;}
-    button{cursor:pointer;border:none;background:#2563eb;font-weight:700;margin-top:12px;}
-    button.secondary{background:transparent;border:1px solid rgba(255,255,255,.18);}
-    .row{display:flex;gap:10px;margin-top:10px;}
-    .row > *{flex:1}
-    .msg{margin-top:10px;font-size:13px}
-    .ok{color:#34d399}
-    .err{color:#fb7185}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Aplicativo Rural — Login</h1>
-    <div class="muted">Entre com email e senha. Se não tiver conta, cadastre.</div>
+    html, body { height: 100%; }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;}
 
-    <label>Email</label>
-    <input id="email" type="email" placeholder="seuemail@exemplo.com" />
+    .app{display:flex;height:100vh;}
 
-    <label>Senha</label>
-    <input id="pass" type="password" placeholder="••••••••" />
-
-    <label>Seu nome (no cadastro)</label>
-    <input id="nome" type="text" placeholder="Ex: Zé Ramilton" />
-
-    <div class="row">
-      <button class="secondary" id="btnSignup">Cadastrar</button>
-      <button id="btnLogin">Entrar</button>
-    </div>
-
-    <div class="msg" id="msg"></div>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script>
-    // ✅ CONFIG (mesmo padrão do seu projeto)
-    const SUPABASE_URL = window.__SUPABASE_URL || "https://kqsbjgqtplvooxnqcmft.supabase.co";
-    const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || "COLE_SUA_ANON_KEY_EYJ_AQUI";
-    const EMPRESA_ID = window.__EMPRESA_ID || "agrojunqueira";
-
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-    const msg = (txt, ok=false) => {
-      const el = document.getElementById("msg");
-      el.className = "msg " + (ok ? "ok" : "err");
-      el.textContent = txt;
-    };
-
-    async function ensureProfile(user, nome) {
-      // cria/atualiza perfil do app em public.usuarios
-      const payload = { id: user.id, empresa_id: EMPRESA_ID, nome: nome || user.email, role: "user" };
-      const { error } = await sb.from("usuarios").upsert(payload, { onConflict: "id" });
-      if (error) throw error;
+    .side{
+      width:360px; min-width:320px; max-width:420px;
+      overflow-y:auto; background:#fff; z-index:2000;
+      border-right:1px solid #e5e7eb;
+      -webkit-overflow-scrolling: touch;
     }
 
-    document.getElementById("btnSignup").onclick = async () => {
-      try{
-        msg("Cadastrando...");
-        const email = document.getElementById("email").value.trim();
-        const pass = document.getElementById("pass").value.trim();
-        const nome = document.getElementById("nome").value.trim();
-        if(!email || !pass) return msg("Preencha email e senha.");
-        const { data, error } = await sb.auth.signUp({ email, password: pass });
-        if (error) throw error;
+    .brand{padding:14px 14px 10px;border-bottom:1px solid #e5e7eb;}
+    .brand h1{margin:0;font-size:16px;}
+    .brand .sub{margin:6px 0 0;color:#6b7280;font-size:12px;line-height:1.3;}
 
-        // em alguns casos, o user vem em data.user
-        const user = data?.user;
-        if (user) await ensureProfile(user, nome);
+    .controls{padding:10px 14px;border-bottom:1px solid #e5e7eb;}
+    select,input,button,textarea{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;}
+    button{cursor:pointer;background:#111827;color:#fff;border:none;border-radius:10px;}
+    button.secondary{background:#f3f4f6;color:#111827;border:1px solid #e5e7eb;}
 
-        msg("Cadastro OK. Agora faça login.", true);
-      }catch(e){
-        msg("Erro: " + (e?.message || e));
+    .panel{padding:14px;overflow:auto;}
+    .card{border:1px solid #e5e7eb;border-radius:14px;padding:12px;margin-bottom:12px;}
+    .muted{color:#6b7280;font-size:12px}
+    .row{display:flex;gap:10px;}
+    .row > *{flex:1;}
+
+    #map{flex:1;height:100vh; min-height: 0;}
+
+    /* ====== MODAL ====== */
+    .modal-backdrop{
+      position:fixed; inset:0; background:rgba(0,0,0,.35);
+      display:none; align-items:center; justify-content:center;
+      padding:16px; z-index:9999;
+    }
+    .modal{
+      background:#fff; border-radius:16px; max-width:520px; width:100%;
+      max-height:92vh; overflow:auto; border:1px solid #e5e7eb;
+    }
+    .modal header{padding:14px 16px;border-bottom:1px solid #e5e7eb;}
+    .modal main{padding:16px;}
+    .modal footer{padding:14px 16px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end;}
+    label{font-size:12px;color:#374151;font-weight:600;display:block;margin:10px 0 6px;}
+
+    /* ====== BOTÃO + (FAB) ====== */
+    #fabAdd{
+      display:none;
+      position:fixed;
+      left:18px; bottom:88px;
+      width:64px; height:64px;
+      border-radius:999px;
+      border:none;
+      font-size:34px;
+      font-weight:800;
+      background:#111827;
+      color:#fff;
+      z-index:7000;
+      box-shadow:0 12px 30px rgba(0,0,0,.25);
+    }
+
+    /* ====== MOBILE ====== */
+    @media (max-width: 900px){
+      body{ overflow:hidden; }
+      .app{flex-direction:column;height:100vh;}
+      .side{
+        width:100%;
+        max-width:none;
+        min-width:0;
+        position:sticky;
+        top:0;
+        z-index:5000;
+        border-right:none;
+        border-bottom:1px solid #e5e7eb;
+        max-height: 46vh;
+        overflow-y:auto;
+        -webkit-overflow-scrolling: touch;
       }
-    };
+      #map{flex:1;height:auto;min-height: 54vh;}
+      #fabAdd{ display:block; }
+    }
+  </style>
+</head>
 
-    document.getElementById("btnLogin").onclick = async () => {
-      try{
-        msg("Entrando...");
-        const email = document.getElementById("email").value.trim();
-        const pass = document.getElementById("pass").value.trim();
-        if(!email || !pass) return msg("Preencha email e senha.");
+<body>
+  <div class="app">
+    <div class="side" id="sidebar">
+      <div class="brand">
+        <h1>Aplicativo Rural — MVP (Mapa + Talhão)</h1>
+        <div class="sub">Mapa + ocorrências + fotos no Supabase Storage.</div>
+      </div>
 
-        const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
-        if (error) throw error;
+      <div class="controls">
+        <div class="row" style="margin-bottom:10px;">
+          <select id="profileSelect">
+            <option value="user">Perfil: Usuário</option>
+            <option value="master">Perfil: Master</option>
+          </select>
+          <select id="modeSelect">
+            <option value="talhao">Modo: Talhão</option>
+            <option value="fazenda">Modo: Fazenda</option>
+          </select>
+        </div>
 
-        // garante perfil
-        await ensureProfile(data.user, document.getElementById("nome").value.trim());
+        <select id="farmSelect">
+          <option value="">Carregando fazendas…</option>
+        </select>
+      </div>
 
-        msg("Login OK. Indo pro mapa...", true);
-        window.location.href = "./index.html";
-      }catch(e){
-        msg("Erro: " + (e?.message || e));
+      <div class="panel">
+        <div class="card" id="infoCard">
+          <div class="muted">Selecione uma fazenda e clique em um talhão.</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="map"></div>
+  </div>
+
+  <!-- Botão + flutuante -->
+  <button id="fabAdd" title="Criar ocorrência">+</button>
+
+  <!-- Libs -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@tmcw/togeojson@5.6.2/dist/togeojson.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <!-- Supabase (UMA vez só) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <!-- CONFIG SUPABASE -->
+  <script>
+    window.__SUPABASE_URL = "https://kqsbjgqtplvooxnqcmft.supabase.co";
+
+    // COLE A "Anon Key (Legacy)" (eyJ...)
+    window.__SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtxc2JqZ3F0cGx2b294bnFjbWZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4NDQ1MzQsImV4cCI6MjA4NjQyMDUzNH0.Ag1rtfwexpIlxW1kcRGhW71QrIMsEs6EkhAsiXvqoBI";
+    window.__SUPABASE_ANON_KEY = "sb_publishable_b8R_PutuU4EUd3Tomdq7Bg_j-eqr-H7";
+
+    window.__FOTOS_BUCKET = "ocorrencias-fotos";
+    window.__EMPRESA_ID = "agrojunqueira";
+  </script>
+
+  <!-- Modal -->
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal">
+      <header>
+        <div id="modalTitle" style="font-weight:700;">Nova ocorrência</div>
+        <div class="muted" id="modalSub"></div>
+      </header>
+      <main id="modalBody"></main>
+      <footer>
+        <button class="secondary" id="modalCancel">Cancelar</button>
+        <button id="modalSave">Salvar</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- App -->
+  <script src="./app.js"></script>
+
+  <script>
+    // mata SW antigo cacheando (evita bug no iPhone/atalho)
+    try{
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(regs=>regs.forEach(r=>r.unregister()));
       }
-    };
+    }catch(e){}
 
-    // se já tiver logado, manda pro mapa
-    (async ()=>{
-      const { data } = await sb.auth.getSession();
-      if (data?.session) window.location.href = "./index.html";
-    })();
+    // Leaflet “mapa branco” no iPhone
+    function fixLeafletSize() {
+      const m = window.__leafletMap;
+      if (m && m.invalidateSize) setTimeout(() => m.invalidateSize(), 250);
+    }
+    window.addEventListener("load", fixLeafletSize);
+    window.addEventListener("resize", fixLeafletSize);
+    document.addEventListener("visibilitychange", fixLeafletSize);
+    window.addEventListener("pageshow", fixLeafletSize);
   </script>
 </body>
 </html>
