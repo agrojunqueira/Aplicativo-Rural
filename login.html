@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aplicativo Rural — Login</title>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#0b1220;color:#fff;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px;}
+    .card{width:100%;max-width:420px;background:#111827;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:16px;box-shadow:0 16px 40px rgba(0,0,0,.35);}
+    h1{font-size:16px;margin:0 0 8px;}
+    .muted{color:#9ca3af;font-size:12px;line-height:1.4;margin-bottom:14px;}
+    label{font-size:12px;color:#cbd5e1;font-weight:600;display:block;margin:10px 0 6px;}
+    input,button{width:100%;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0b1220;color:#fff;font-size:14px;}
+    button{cursor:pointer;border:none;background:#2563eb;font-weight:700;margin-top:12px;}
+    button.secondary{background:transparent;border:1px solid rgba(255,255,255,.18);}
+    .row{display:flex;gap:10px;margin-top:10px;}
+    .row > *{flex:1}
+    .msg{margin-top:10px;font-size:13px}
+    .ok{color:#34d399}
+    .err{color:#fb7185}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Aplicativo Rural — Login</h1>
+    <div class="muted">Entre com email e senha. Se não tiver conta, cadastre.</div>
+
+    <label>Email</label>
+    <input id="email" type="email" placeholder="seuemail@exemplo.com" />
+
+    <label>Senha</label>
+    <input id="pass" type="password" placeholder="••••••••" />
+
+    <label>Seu nome (no cadastro)</label>
+    <input id="nome" type="text" placeholder="Ex: Zé Ramilton" />
+
+    <div class="row">
+      <button class="secondary" id="btnSignup">Cadastrar</button>
+      <button id="btnLogin">Entrar</button>
+    </div>
+
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    // ✅ CONFIG (mesmo padrão do seu projeto)
+    const SUPABASE_URL = window.__SUPABASE_URL || "https://kqsbjgqtplvooxnqcmft.supabase.co";
+    const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || "COLE_SUA_ANON_KEY_EYJ_AQUI";
+    const EMPRESA_ID = window.__EMPRESA_ID || "agrojunqueira";
+
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const msg = (txt, ok=false) => {
+      const el = document.getElementById("msg");
+      el.className = "msg " + (ok ? "ok" : "err");
+      el.textContent = txt;
+    };
+
+    async function ensureProfile(user, nome) {
+      // cria/atualiza perfil do app em public.usuarios
+      const payload = { id: user.id, empresa_id: EMPRESA_ID, nome: nome || user.email, role: "user" };
+      const { error } = await sb.from("usuarios").upsert(payload, { onConflict: "id" });
+      if (error) throw error;
+    }
+
+    document.getElementById("btnSignup").onclick = async () => {
+      try{
+        msg("Cadastrando...");
+        const email = document.getElementById("email").value.trim();
+        const pass = document.getElementById("pass").value.trim();
+        const nome = document.getElementById("nome").value.trim();
+        if(!email || !pass) return msg("Preencha email e senha.");
+        const { data, error } = await sb.auth.signUp({ email, password: pass });
+        if (error) throw error;
+
+        // em alguns casos, o user vem em data.user
+        const user = data?.user;
+        if (user) await ensureProfile(user, nome);
+
+        msg("Cadastro OK. Agora faça login.", true);
+      }catch(e){
+        msg("Erro: " + (e?.message || e));
+      }
+    };
+
+    document.getElementById("btnLogin").onclick = async () => {
+      try{
+        msg("Entrando...");
+        const email = document.getElementById("email").value.trim();
+        const pass = document.getElementById("pass").value.trim();
+        if(!email || !pass) return msg("Preencha email e senha.");
+
+        const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+        if (error) throw error;
+
+        // garante perfil
+        await ensureProfile(data.user, document.getElementById("nome").value.trim());
+
+        msg("Login OK. Indo pro mapa...", true);
+        window.location.href = "./index.html";
+      }catch(e){
+        msg("Erro: " + (e?.message || e));
+      }
+    };
+
+    // se já tiver logado, manda pro mapa
+    (async ()=>{
+      const { data } = await sb.auth.getSession();
+      if (data?.session) window.location.href = "./index.html";
+    })();
+  </script>
+</body>
+</html>
