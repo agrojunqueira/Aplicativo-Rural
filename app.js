@@ -63,6 +63,25 @@ function statusLabel(s) {
   return s || "—";
 }
 
+function statusBadge(status) {
+  const s = normStatus(status);
+  if (s === STATUS.PENDENTE) return `<span class="badge orange">Pendente</span>`;
+  if (s === STATUS.EM_ANDAMENTO) return `<span class="badge gray">Em andamento</span>`;
+  if (s === STATUS.FEITA) return `<span class="badge green">Feita</span>`;
+  if (s === STATUS.CANCELADA) return `<span class="badge red">Cancelada</span>`;
+  return `<span class="badge gray">${statusLabel(status)}</span>`;
+}
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[c]));
+}
+
 // =============================
 // AUTH / PERFIL
 // =============================
@@ -72,10 +91,11 @@ let __perfil = null; // {nome, role, empresa_id}
 
 async function guardSession() {
   assertSb();
+
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
   if (!__session) {
-    window.location.href = "/login.html";
+    window.location.href = "./login.html";
     throw new Error("Sem sessão.");
   }
 
@@ -154,10 +174,8 @@ async function uploadPhotosToSupabase({ files, farmCode, talhao, occId }) {
 // =============================
 // DB: OCORRÊNCIAS
 // =============================
-
-// Cache em memória pra ficar rápido
 let OCC_CACHE_BY_FARM = new Map(); // farm_code -> ocorrencias[]
-let FARM_STATUS = new Map(); // farm_code -> "pendente"|"em_andamento"|"ok"
+let FARM_STATUS = new Map(); // farm_code -> status calculado (pendente/em_andamento/ok)
 
 function normalizeFarmCode(x) {
   if (x === null || x === undefined) return null;
@@ -277,19 +295,6 @@ async function updateOccStatus({ id, status }) {
   return data;
 }
 
-async function updateOccFields({ id, patch }) {
-  assertSb();
-  const { data, error } = await sb
-    .from("ocorrencias")
-    .update(patch)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
 async function cancelOcc({ id }) {
   if (!isMaster()) {
     alert("Só Master pode cancelar ocorrência.");
@@ -301,6 +306,7 @@ async function cancelOcc({ id }) {
     cancelada_por: __user.id,
     cancelada_em: new Date().toISOString()
   };
+
   const { data, error } = await sb
     .from("ocorrencias")
     .update(patch)
@@ -338,26 +344,6 @@ function chaveFromProps(props) {
 function formatNum(x, dec = 1) {
   if (x === null || x === undefined || Number.isNaN(x)) return "—";
   return Number(x).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
-
-// ✅ FALTAVA no seu código (e você usa em vários lugares)
-function escapeHtml(s) {
-  return String(s || "").replace(/[&<>"']/g, c => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[c]));
-}
-
-function statusBadge(status) {
-  const s = normStatus(status);
-  if (s === STATUS.PENDENTE) return `<span class="badge orange">Pendente</span>`;
-  if (s === STATUS.EM_ANDAMENTO) return `<span class="badge gray">Em andamento</span>`;
-  if (s === STATUS.FEITA) return `<span class="badge green">Feita</span>`;
-  if (s === STATUS.CANCELADA) return `<span class="badge red">Cancelada</span>`;
-  return `<span class="badge gray">${statusLabel(status)}</span>`;
 }
 
 // ---- Modal ----
@@ -540,7 +526,6 @@ async function renderFarmCard(farmCode) {
     <div class="occ">
       <div class="row">
         <button id="btnNewOccFarm">+ Criar Ocorrência (Fazenda)</button>
-        <button class="secondary" id="btnPendReport">Pendências</button>
         <button class="secondary" id="btnRefreshOccFarm">Atualizar</button>
         <button class="secondary" id="btnLogout">Sair</button>
       </div>
@@ -554,7 +539,6 @@ async function renderFarmCard(farmCode) {
     await fetchOccByFarm(farmCode);
     await renderOccList({ farmCode, talhao: null });
   };
-  document.getElementById("btnPendReport").onclick = () => openPendReport(farmCode);
   document.getElementById("btnLogout").onclick = async () => {
     await sb.auth.signOut();
     window.location.href = "./login.html";
@@ -597,7 +581,6 @@ async function renderOccList({ farmCode, talhao }) {
       : "";
 
     const dtStr = new Date(o.created_at).toLocaleString("pt-BR");
-
     const canCancel = isMaster();
     const cancelBtn = canCancel ? `<button class="secondary" onclick="window.__cancelOcc('${o.id}')">Cancelar</button>` : ``;
 
@@ -703,52 +686,6 @@ window.__cancelOcc = async (id) => {
   }
 };
 
-function openPendReport(farmCode) {
-  const rows = (OCC_CACHE_BY_FARM.get(normalizeFarmCode(farmCode)) || [])
-    .filter(o => !o.cancelada && [STATUS.PENDENTE, STATUS.EM_ANDAMENTO].includes(normStatus(o.status)));
-
-  const groups = new Map();
-  for (const o of rows) {
-    const key = o.talhao ? `Talhão ${o.talhao}` : "Fazenda (geral)";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(o);
-  }
-
-  const html = [...groups.entries()].map(([k, arr]) => {
-    arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const items = arr.slice(0, 12).map(o => {
-      const dt = new Date(o.created_at).toLocaleString("pt-BR");
-      return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:8px;margin-top:6px;">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
-          <div><b>${escapeHtml(o.cultura || "—")}</b> • <span class="small">${dt}</span></div>
-          ${statusBadge(normStatus(o.status))}
-        </div>
-        <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
-      </div>`;
-    }).join("");
-
-    return `<div style="margin-top:12px;">
-      <div style="font-weight:700;">${escapeHtml(k)} <span class="small">(${arr.length})</span></div>
-      ${items}
-    </div>`;
-  }).join("");
-
-  const body = `
-    <div>
-      <div class="small">Pendências = status <b>Pendente</b> ou <b>Em andamento</b> (não canceladas).</div>
-      <div style="margin-top:10px;">
-        <div class="row">
-          <div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px;">
-            <div class="small">Total pendências</div>
-            <div style="font-size:22px;font-weight:800;">${rows.length}</div>
-          </div>
-        </div>
-        ${html || '<div class="muted" style="margin-top:10px;">Nenhuma pendência 🎉</div>'}
-      </div>
-    </div>`;
-  openModal({ title: "Relatório de pendências", sub: `Fazenda ${farmCode}`, bodyHtml: body, onSave: null });
-}
-
 // =============================
 // FORM: CRIAR OCORRÊNCIA
 // =============================
@@ -779,7 +716,6 @@ function openOccForm({ farmCode, farmName, talhao }) {
         <option value="${STATUS.PENDENTE}" selected>Pendente</option>
         <option value="${STATUS.EM_ANDAMENTO}">Em andamento</option>
         <option value="${STATUS.FEITA}">Feita</option>
-        <option value="${STATUS.CANCELADA}">Cancelada</option>
       </select>
 
       <label>Fotos (opcional)</label>
@@ -1071,7 +1007,6 @@ async function init() {
     });
   }
 
-  // default: mapa geral
   drawAllFarms();
 }
 
