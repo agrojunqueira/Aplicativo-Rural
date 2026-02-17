@@ -5,16 +5,17 @@ let prod2025 = {};
 let farmLabelMarker = null;
 
 // =============================
-// SUPABASE STORAGE (FOTOS)
+// SUPABASE
 // =============================
 const SUPABASE_URL = window.__SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = window.__SUPABASE_ANON_KEY || "";
+const EMPRESA_ID = window.__EMPRESA_ID || "default";
+const FOTOS_BUCKET = window.__FOTOS_BUCKET || "ocorrencias-fotos";
+
 console.log("SUPABASE_URL:", SUPABASE_URL);
 console.log("SUPABASE_KEY_PREFIX:", (SUPABASE_ANON_KEY || "").slice(0, 20));
 console.log("SUPABASE_KEY_IS_EYJ:", (SUPABASE_ANON_KEY || "").startsWith("eyJ"));
-console.log("SUPABASE_KEY_IS_PUBLISHABLE:", (SUPABASE_ANON_KEY || "").startsWith("sb_publishable_"));
-const EMPRESA_ID = window.__EMPRESA_ID || "default";
-const FOTOS_BUCKET = window.__FOTOS_BUCKET || "ocorrencias-fotos";
+console.log("EMPRESA_ID:", EMPRESA_ID);
 
 let sb = null;
 try {
@@ -25,6 +26,50 @@ try {
   sb = null;
 }
 
+// =============================
+// LOCAL STORAGE (fallback)
+// =============================
+const LS_KEY = "aplicativo_rural_ocorrencias_v2";
+
+function loadOccLocal() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+function saveOccLocal(arr) {
+  localStorage.setItem(LS_KEY, JSON.stringify(arr));
+}
+
+// =============================
+// UUID
+// =============================
+function uid() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// =============================
+// Helpers
+// =============================
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[c]));
+}
+
 function slugFileName(name) {
   return String(name || "foto")
     .normalize("NFD")
@@ -32,6 +77,43 @@ function slugFileName(name) {
     .replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function formatNum(x, dec = 1) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "—";
+  return Number(x).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+function statusBadge(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "pendente") return `<span class="badge orange">Pendente</span>`;
+  if (s === "em andamento") return `<span class="badge gray">Em andamento</span>`;
+  if (s === "feito") return `<span class="badge green">Feito</span>`;
+  return `<span class="badge gray">${status || "—"}</span>`;
+}
+
+function parseFarmName(inf) {
+  // Ex: "23110-FLOR DA MATA-01"
+  if (!inf) return { farmCode: "", farmName: "", talhao: "" };
+  const parts = String(inf).split("-").map(p => p.trim()).filter(Boolean);
+
+  if (parts.length === 1) return { farmCode: parts[0] || "", farmName: "", talhao: "" };
+  if (parts.length === 2) return { farmCode: parts[0] || "", farmName: parts[1] || "", talhao: "" };
+
+  const farmCode = parts[0] || "";
+  const talhao = parts[parts.length - 1] || "";
+  const farmName = parts.slice(1, parts.length - 1).join("-").trim();
+  return { farmCode, farmName, talhao };
+}
+
+function chaveFromProps(props) {
+  const farm = (props.PROPRIEAD ?? "").toString().trim();
+  const tal = (props.TALHAO ?? "").toString().trim();
+  if (!farm || !tal) return "";
+  return `${farm}_${parseInt(tal, 10)}`;
+}
+
+// =============================
+// FOTOS: upload + public url
+// =============================
 async function uploadPhotosToSupabase({ files, farmCode, talhao, occId }) {
   if (!sb) return { urls: [], errors: ["Supabase não configurado no front."] };
 
@@ -68,115 +150,97 @@ async function uploadPhotosToSupabase({ files, farmCode, talhao, occId }) {
   return { urls, errors };
 }
 
-// ---- Ocorrências (armazenamento local) ----
-const LS_KEY = "aplicativo_rural_ocorrencias_v1";
-
-function loadOcc() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) {
-    return [];
-  }
-}
-function saveOcc(arr) {
-  localStorage.setItem(LS_KEY, JSON.stringify(arr));
-}
-
-// ✅ CORREÇÃO: id compatível com coluna uuid do Supabase
-function uid() {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  // fallback (quase-uuid)
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-// ✅ PASSO 1: INSERT mínimo no Supabase (só pra provar que grava na tabela)
-// (Depois no PASSO 2 a gente salva tudo em jsonb/colunas)
-async function insertOccSupabaseMin({ id, farmCode }) {
+// =============================
+// SUPABASE: salvar e listar ocorrências (source of truth)
+// =============================
+async function upsertOccSupabase(record) {
   if (!sb) return { data: null, error: new Error("Supabase não configurado no front.") };
 
+  // payload = registro inteiro (jsonb)
   const payload = {
-    id,
+    id: record.id,
     empresa_id: EMPRESA_ID,
-    farm_code: farmCode || null,
-    created_by: null, // sem auth por enquanto
+    farm_code: record.farmCode || null,
+    created_by: null, // sem login por enquanto
+    payload: record,
   };
 
   const { data, error } = await sb
     .from("ocorrencias")
-    .insert([payload])
+    .upsert([payload], { onConflict: "id" })
     .select()
     .single();
 
   return { data, error };
 }
 
-function parseFarmName(inf) {
-  // Example: "23110-FLOR DA MATA-01"
-  if (!inf) return { farmCode: "", farmName: "", talhao: "" };
-  const parts = String(inf).split("-").map(p => p.trim()).filter(Boolean);
+async function fetchOccFromSupabase({ farmCode }) {
+  if (!sb) return { data: [], error: new Error("Supabase não configurado no front.") };
 
-  if (parts.length === 1) {
-    return { farmCode: parts[0] || "", farmName: "", talhao: "" };
+  let q = sb
+    .from("ocorrencias")
+    .select("id, empresa_id, farm_code, payload, created_at")
+    .eq("empresa_id", EMPRESA_ID)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (farmCode) q = q.eq("farm_code", String(farmCode));
+
+  const { data, error } = await q;
+  if (error) return { data: [], error };
+
+  // normaliza para lista de records
+  const list = (data || [])
+    .map(r => r.payload || null)
+    .filter(Boolean);
+
+  return { data: list, error: null };
+}
+
+// =============================
+// Estado: ocorrências carregadas (sempre do Supabase)
+// =============================
+let OCC = []; // cache em memória
+
+async function refreshOccCache({ farmCode } = {}) {
+  // tenta Supabase
+  try {
+    const { data, error } = await fetchOccFromSupabase({ farmCode: farmCode || null });
+    if (!error) {
+      OCC = data || [];
+      // salva fallback local (pra não perder se ficar sem internet depois)
+      saveOccLocal(OCC);
+      return;
+    }
+    console.warn("⚠️ Supabase fetch erro:", error);
+  } catch (e) {
+    console.warn("⚠️ Supabase fetch exception:", e);
   }
-  if (parts.length === 2) {
-    return { farmCode: parts[0] || "", farmName: parts[1] || "", talhao: "" };
-  }
 
-  const farmCode = parts[0] || "";
-  const talhao = parts[parts.length - 1] || "";
-  const farmName = parts.slice(1, parts.length - 1).join("-").trim();
-  return { farmCode, farmName, talhao };
+  // fallback local
+  OCC = loadOccLocal();
 }
 
-function chaveFromProps(props) {
-  const farm = (props.PROPRIEAD ?? "").toString().trim();
-  const tal = (props.TALHAO ?? "").toString().trim();
-  if (!farm || !tal) return "";
-  return `${farm}_${parseInt(tal, 10)}`;
-}
-
-function formatNum(x, dec = 1) {
-  if (x === null || x === undefined || Number.isNaN(x)) return "—";
-  return Number(x).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
-
-function statusBadge(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "pendente") return `<span class="badge orange">Pendente</span>`;
-  if (s === "em andamento") return `<span class="badge gray">Em andamento</span>`;
-  if (s === "feito") return `<span class="badge green">Feito</span>`;
-  return `<span class="badge gray">${status || "—"}</span>`;
-}
-
-/**
- * Agora o talhão é impactado por ocorrência:
- * - scope==="talhao" (normal)
- * - scope==="fazenda" com farmApply === "todos" ou "selecionar" (replicadas em talhão)
- *
- * Como você está replicando no SAVE, aqui segue olhando só talhão.
- */
+// =============================
+// Status baseado no cache OCC
+// =============================
 function computeStatusForTalhao(farmCode, talhao) {
-  const occ = loadOcc().filter(o => o.scope === "talhao" && o.farmCode === farmCode && o.talhao === talhao);
+  const occ = OCC.filter(o => o.scope === "talhao" && o.farmCode === farmCode && o.talhao === talhao);
   if (occ.some(o => o.status === "Pendente")) return "Pendente";
   if (occ.some(o => o.status === "Em andamento")) return "Em andamento";
   return "OK";
 }
 
 function computeStatusForFarm(farmCode) {
-  const all = loadOcc().filter(o => o.farmCode === farmCode);
+  const all = OCC.filter(o => o.farmCode === farmCode);
   if (all.some(o => o.status === "Pendente")) return "Pendente";
   if (all.some(o => o.status === "Em andamento")) return "Em andamento";
   return "OK";
 }
 
-// ---- Modal ----
+// =============================
+// Modal
+// =============================
 function openModal({ title, sub, bodyHtml, onSave }) {
   const bd = document.getElementById("modalBackdrop");
   document.getElementById("modalTitle").textContent = title || "Modal";
@@ -219,6 +283,9 @@ function getMode() {
   return document.getElementById("modeSelect")?.value || "talhao";
 }
 
+// =============================
+// UI: Cards
+// =============================
 function renderTalhaoCard(feature) {
   const props = feature.properties || {};
   const layerId = (props.LAYER ?? "").toString();
@@ -228,7 +295,7 @@ function renderTalhaoCard(feature) {
   const prod = prod2025[chave] || {};
 
   let areaHa = null;
-  try { areaHa = turf.area(feature) / 10000.0; } catch (e) { }
+  try { areaHa = turf.area(feature) / 10000.0; } catch (e) {}
 
   const status = computeStatusForTalhao(farmCode, talhao);
 
@@ -271,20 +338,26 @@ function renderTalhaoCard(feature) {
   `;
 
   document.getElementById("btnNewOcc").onclick = () => openOccForm({ scope: "talhao", farmCode, farmName, talhao });
-  document.getElementById("btnRefreshOcc").onclick = () => renderOccList({ scope: "talhao", farmCode, talhao });
+  document.getElementById("btnRefreshOcc").onclick = async () => {
+    await refreshOccCache({ farmCode });
+    renderOccList({ scope: "talhao", farmCode, talhao });
+    refreshMapStyles();
+  };
+
   renderOccList({ scope: "talhao", farmCode, talhao });
 }
 
 function renderFarmCard(farmCode) {
   const farm = farms.get(farmCode);
   if (!farm) return;
+
   const status = computeStatusForFarm(farmCode);
 
   let totalHa = 0;
   let sumTch = 0, sumAtr = 0, sumW = 0;
   farm.features.forEach(f => {
     let ha = 0;
-    try { ha = turf.area(f) / 10000.0; } catch (e) { }
+    try { ha = turf.area(f) / 10000.0; } catch (e) {}
     totalHa += ha;
     const key = chaveFromProps(f.properties || {});
     const p = prod2025[key];
@@ -294,6 +367,7 @@ function renderFarmCard(farmCode) {
       if (p.atr != null) sumAtr += ha * p.atr;
     }
   });
+
   const tchMed = sumW ? (sumTch / sumW) : null;
   const atrMed = sumW ? (sumAtr / sumW) : null;
 
@@ -335,20 +409,24 @@ function renderFarmCard(farmCode) {
   `;
 
   document.getElementById("btnNewOccFarm").onclick = () => openOccForm({ scope: "fazenda", farmCode, farmName: farm.name, talhao: null });
-  document.getElementById("btnRefreshOccFarm").onclick = () => renderOccList({ scope: "fazenda", farmCode, talhao: null });
+  document.getElementById("btnRefreshOccFarm").onclick = async () => {
+    await refreshOccCache({ farmCode });
+    renderOccList({ scope: "fazenda", farmCode, talhao: null });
+    refreshMapStyles();
+  };
   document.getElementById("btnPendReport").onclick = () => window.__openPendReport(farmCode);
 
   renderOccList({ scope: "fazenda", farmCode, talhao: null });
 }
 
 function renderOccList({ scope, farmCode, talhao }) {
-  const all = loadOcc();
   let list = [];
   if (scope === "talhao") {
-    list = all.filter(o => o.scope === "talhao" && o.farmCode === farmCode && o.talhao === talhao);
+    list = OCC.filter(o => o.scope === "talhao" && o.farmCode === farmCode && o.talhao === talhao);
   } else {
-    list = all.filter(o => o.farmCode === farmCode);
+    list = OCC.filter(o => o.farmCode === farmCode);
   }
+
   list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const wrap = document.getElementById("occList");
   if (!wrap) return;
@@ -360,16 +438,16 @@ function renderOccList({ scope, farmCode, talhao }) {
 
   wrap.innerHTML = list.map(o => {
     const where = o.scope === "talhao" ? `Talhão ${o.talhao}` : "Fazenda";
-    const pr = (o.pragas || []).map(x => `<span class="tag">${x}</span>`).join("");
-    const mt = (o.matos || []).map(x => `<span class="tag">${x}</span>`).join("");
+    const pr = (o.pragas || []).map(x => `<span class="tag">${escapeHtml(x)}</span>`).join("");
+    const mt = (o.matos || []).map(x => `<span class="tag">${escapeHtml(x)}</span>`).join("");
 
     const fotos = (o.photos || []).length
       ? `<div class="thumbs">` +
-      (o.photos || []).slice(0, 3).map((p, idx) =>
-        `<img class="thumb" src="${p}" title="Abrir" onclick="window.__openPhotoViewer('${o.id}', ${idx})" />`
-      ).join("") +
-      ((o.photos || []).length > 3 ? `<div class="thumb-more" onclick="window.__openPhotoViewer('${o.id}', 0)">+${(o.photos || []).length - 3}</div>` : "") +
-      `</div>`
+        (o.photos || []).slice(0, 3).map((p, idx) =>
+          `<img class="thumb" src="${p}" title="Abrir" onclick="window.__openPhotoViewer('${o.id}', ${idx})" />`
+        ).join("") +
+        ((o.photos || []).length > 3 ? `<div class="thumb-more" onclick="window.__openPhotoViewer('${o.id}', 0)">+${(o.photos || []).length - 3}</div>` : "") +
+        `</div>`
       : "";
 
     const dt = new Date(o.date || o.createdAt || Date.now());
@@ -400,7 +478,7 @@ function renderOccList({ scope, farmCode, talhao }) {
   }).join("");
 
   wrap.querySelectorAll(".statusSel").forEach(sel => {
-    sel.onchange = () => {
+    sel.onchange = async () => {
       const id = sel.getAttribute("data-id");
       const next = sel.value;
 
@@ -410,23 +488,27 @@ function renderOccList({ scope, farmCode, talhao }) {
         return;
       }
 
+      const idx = OCC.findIndex(o => o.id === id);
+      if (idx < 0) return;
+
+      // se for FEITO, exige texto
       if (next === "Feito") {
         openModal({
           title: "Finalizar ocorrência",
           sub: "Para marcar como FEITO, descreva o que foi feito (obrigatório).",
           bodyHtml: `<label>O que foi feito *</label><textarea id="doneText" placeholder="Ex: Aplicado X, dose Y, data..."></textarea>`,
-          onSave: () => {
+          onSave: async () => {
             const txt = document.getElementById("doneText").value.trim();
             if (!txt) { alert("Campo obrigatório: o que foi feito."); return false; }
-            const arr = loadOcc();
-            const idx = arr.findIndex(o => o.id === id);
-            if (idx >= 0) {
-              arr[idx].status = "Feito";
-              arr[idx].doneText = txt;
-              arr[idx].doneAt = Date.now();
-              saveOcc(arr);
-            }
+
+            OCC[idx].status = "Feito";
+            OCC[idx].doneText = txt;
+            OCC[idx].doneAt = Date.now();
+
+            await upsertOccSupabase(OCC[idx]);
+            saveOccLocal(OCC);
             refreshCurrentCard();
+            refreshMapStyles();
             return true;
           }
         });
@@ -435,24 +517,23 @@ function renderOccList({ scope, farmCode, talhao }) {
         return;
       }
 
-      const arr = loadOcc();
-      const idx = arr.findIndex(o => o.id === id);
-      if (idx >= 0) {
-        arr[idx].status = next;
-        saveOcc(arr);
-      }
+      OCC[idx].status = next;
+
+      await upsertOccSupabase(OCC[idx]);
+      saveOccLocal(OCC);
       refreshCurrentCard();
+      refreshMapStyles();
     };
   });
 }
 
-function escapeHtml(s) {
-  return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
+// =============================
+// Photo viewer + Pend report
+// =============================
 window.__openPhotoViewer = (occId, startIdx = 0) => {
-  const occ = loadOcc().find(o => o.id === occId);
+  const occ = OCC.find(o => o.id === occId);
   if (!occ || !occ.photos || !occ.photos.length) return;
+
   let i = Math.max(0, Math.min(startIdx, occ.photos.length - 1));
   const render = () => {
     const img = occ.photos[i];
@@ -467,12 +548,14 @@ window.__openPhotoViewer = (occId, startIdx = 0) => {
           <button class="secondary" id="pvNext">Próxima ➡️</button>
         </div>
       </div>`;
+
     openModal({
       title: "Fotos da ocorrência",
       sub: `${occ.farmCode} — ${occ.farmName}` + (occ.scope === "talhao" ? ` • Talhão ${occ.talhao}` : ""),
       bodyHtml,
       onSave: null
     });
+
     setTimeout(() => {
       const prev = document.getElementById("pvPrev");
       const next = document.getElementById("pvNext");
@@ -480,13 +563,15 @@ window.__openPhotoViewer = (occId, startIdx = 0) => {
       if (next) next.onclick = () => { i = (i + 1) % occ.photos.length; render(); };
     }, 0);
   };
+
   render();
 };
 
 window.__openPendReport = (farmCode) => {
   const farm = farms.get(farmCode);
   if (!farm) return;
-  const all = loadOcc().filter(o => o.farmCode === farmCode);
+
+  const all = OCC.filter(o => o.farmCode === farmCode);
   const pend = all.filter(o => o.status !== "Feito");
 
   const groups = new Map();
@@ -498,7 +583,7 @@ window.__openPendReport = (farmCode) => {
 
   const rows = [...groups.entries()].map(([k, arr]) => {
     arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    const items = arr.slice(0, 8).map(o => {
+    const items = arr.slice(0, 10).map(o => {
       const dt = new Date(o.date || o.createdAt || Date.now()).toLocaleDateString("pt-BR");
       return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:8px;margin-top:6px;">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -532,15 +617,19 @@ window.__openPendReport = (farmCode) => {
         ${rows || '<div class="muted" style="margin-top:10px;">Nenhuma pendência 🎉</div>'}
       </div>
     </div>`;
+
   openModal({ title: "Relatório de pendências", sub: `Fazenda ${farmCode} — ${farm.name}`, bodyHtml: body, onSave: null });
 };
 
 window.__editOcc = (id) => {
-  const occ = loadOcc().find(o => o.id === id);
+  const occ = OCC.find(o => o.id === id);
   if (!occ) return;
   openOccForm({ scope: occ.scope, farmCode: occ.farmCode, farmName: occ.farmName, talhao: occ.talhao, existing: occ });
 };
 
+// =============================
+// Form
+// =============================
 function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
   const isEdit = !!existing;
   const title = isEdit ? "Editar ocorrência" : "Nova ocorrência";
@@ -619,9 +708,9 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
 
       const occId = existing?.id || uid();
 
-      // fotos -> SUPABASE urls
+      // fotos -> urls
       const files = [...(document.getElementById("photos").files || [])].slice(0, 6);
-      let photos = [];
+      let photos = existing?.photos?.length ? [...existing.photos] : [];
       if (files.length) {
         const { urls, errors } = await uploadPhotosToSupabase({
           files,
@@ -629,7 +718,7 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
           talhao: scope === "talhao" ? talhao : null,
           occId
         });
-        photos = urls;
+        photos = photos.concat(urls);
 
         if (errors.length) {
           console.warn("Erros no upload:", errors);
@@ -637,60 +726,47 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
         }
       }
 
-      const arr = loadOcc();
+      const recordBase = {
+        id: occId,
+        scope,
+        farmCode,
+        farmName,
+        talhao: scope === "talhao" ? talhao : null,
+        cultura,
+        pragas,
+        matos,
+        observacao: obs,
+        date: date ? Date.parse(date) : Date.now(),
+        status,
+        photos,
+        createdAt: existing?.createdAt || Date.now(),
+      };
 
       // ====== FAZENDA ======
       if (scope === "fazenda") {
         const apply = document.getElementById("farmApply").value;
 
-        // ocorrência "geral" (continua sendo fazenda)
+        // ocorrência geral (sem replicar)
         if (apply === "geral") {
-          const record = {
-            id: occId,
-            scope: "fazenda",
-            farmCode,
-            farmName,
-            talhao: null,
-            cultura,
-            pragas,
-            matos,
-            observacao: obs,
-            date: date ? Date.parse(date) : Date.now(),
-            status,
-            photos: existing?.photos?.length ? existing.photos.concat(photos) : photos,
-            createdAt: existing?.createdAt || Date.now(),
-            farmApply: "geral",
-            farmApplyTalhoes: []
-          };
+          const rec = { ...recordBase, scope: "fazenda", talhao: null, farmApply: "geral", farmApplyTalhoes: [] };
 
-          // ✅ PASSO 1: INSERT mínimo no Supabase
-          try {
-            const { error } = await insertOccSupabaseMin({ id: record.id, farmCode: record.farmCode });
-            if (error) {
-              console.warn("❌ Supabase INSERT falhou (fazenda/geral):", error);
-              alert("⚠️ Supabase bloqueou (401/Policy). Ajuste as POLICIES no Supabase. Veja Console (F12).");
-            } else {
-              console.log("✅ Supabase INSERT OK (fazenda/geral)");
-            }
-          } catch (err) {
-            console.warn("❌ Erro inesperado no Supabase (fazenda/geral):", err);
-            alert("⚠️ Erro ao salvar no Supabase (vou salvar local). Veja o Console (F12).");
+          const { error } = await upsertOccSupabase(rec);
+          if (error) {
+            console.warn("❌ Supabase upsert falhou (fazenda/geral):", error);
+            alert("⚠️ Não consegui salvar no Supabase. Vou salvar local pra não perder (F12 p/ ver).");
           }
 
-          if (existing) {
-            const idx = arr.findIndex(o => o.id === existing.id);
-            if (idx >= 0) arr[idx] = record;
-            else arr.push(record);
-          } else {
-            arr.push(record);
-          }
+          // atualiza cache local
+          const idx = OCC.findIndex(o => o.id === rec.id);
+          if (idx >= 0) OCC[idx] = rec; else OCC.unshift(rec);
+          saveOccLocal(OCC);
 
-          saveOcc(arr);
           refreshCurrentCard();
+          refreshMapStyles();
           return true;
         }
 
-        // pegar lista de talhões da fazenda
+        // replicar em talhões
         const farm = farms.get(farmCode);
         const talhoesDaFazenda = (farm?.features || [])
           .map(f => {
@@ -717,99 +793,50 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
           return false;
         }
 
-        // se estiver editando: remove as ocorrências antigas "replicadas" do mesmo grupo
         const groupId = existing?.groupId || uid();
-        const filtered = arr.filter(o => o.groupId !== groupId);
+        // remove do cache as ocorrências antigas do grupo
+        OCC = OCC.filter(o => o.groupId !== groupId);
+
         const baseCreatedAt = existing?.createdAt || Date.now();
 
         const novos = alvo.map(tal => ({
+          ...recordBase,
           id: uid(),
           groupId,
           scope: "talhao",
-          farmCode,
-          farmName,
           talhao: tal,
-          cultura,
-          pragas,
-          matos,
-          observacao: obs,
-          date: date ? Date.parse(date) : Date.now(),
-          status,
-          photos: photos, // urls
           createdAt: baseCreatedAt,
           fromFarm: true,
           farmApply: apply,
         }));
 
-        saveOcc(filtered.concat(novos));
+        // salva um por um no Supabase
+        for (const rec of novos) {
+          const { error } = await upsertOccSupabase(rec);
+          if (error) console.warn("❌ upsert talhão replicado:", error);
+        }
+
+        OCC = novos.concat(OCC);
+        saveOccLocal(OCC);
+
         refreshCurrentCard();
+        refreshMapStyles();
         return true;
       }
 
       // ====== TALHÃO normal ======
-      const record = {
-        id: occId,
-        scope,
-        farmCode,
-        farmName,
-        talhao: scope === "talhao" ? talhao : null,
-        cultura,
-        pragas,
-        matos,
-        observacao: obs,
-        date: date ? Date.parse(date) : Date.now(),
-        status,
-        photos: existing?.photos?.length ? existing.photos.concat(photos) : photos,
-        createdAt: existing?.createdAt || Date.now(),
-      };
-
-      // ✅ PASSO 1: INSERT mínimo no Supabase
-      try {
-        const { error } = await insertOccSupabaseMin({ id: record.id, farmCode: record.farmCode });
-        if (error) {
-          console.warn("❌ Supabase INSERT falhou (talhão):", error);
-          alert("⚠️ Não salvou no Supabase (vou salvar local). Veja o Console (F12).");
-        } else {
-          console.log("✅ Supabase INSERT OK (talhão)");
-        }
-      } catch (err) {
-        console.warn("❌ Erro inesperado no Supabase (talhão):", err);
-        alert("⚠️ Erro ao salvar no Supabase (vou salvar local). Veja o Console (F12).");
+      const { error } = await upsertOccSupabase(recordBase);
+      if (error) {
+        console.warn("❌ Supabase upsert falhou (talhão):", error);
+        alert("⚠️ Não consegui salvar no Supabase. Vou salvar local pra não perder (F12 p/ ver).");
       }
 
-      if (existing) {
-        const idx = arr.findIndex(o => o.id === existing.id);
-        if (idx >= 0) arr[idx] = record;
-        else arr.push(record);
-      } else {
-        arr.push(record);
-      }
-
-      saveOcc(arr);
-
-      if (record.status === "Feito") {
-        openModal({
-          title: "Finalizar ocorrência",
-          sub: "Para marcar como FEITO, descreva o que foi feito (obrigatório).",
-          bodyHtml: `<label>O que foi feito *</label><textarea id="doneText" placeholder="Ex: Aplicado X, dose Y, data..."></textarea>`,
-          onSave: () => {
-            const txt = document.getElementById("doneText").value.trim();
-            if (!txt) { alert("Campo obrigatório: o que foi feito."); return false; }
-            const arr2 = loadOcc();
-            const idx2 = arr2.findIndex(o => o.id === record.id);
-            if (idx2 >= 0) {
-              arr2[idx2].doneText = txt;
-              arr2[idx2].doneAt = Date.now();
-              arr2[idx2].status = "Feito";
-              saveOcc(arr2);
-            }
-            refreshCurrentCard();
-            return true;
-          }
-        });
-      }
+      const idx = OCC.findIndex(o => o.id === recordBase.id);
+      if (idx >= 0) OCC[idx] = recordBase; else OCC.unshift(recordBase);
+      saveOccLocal(OCC);
 
       refreshCurrentCard();
+      refreshMapStyles();
       return true;
     }
   });
@@ -825,7 +852,9 @@ function openOccForm({ scope, farmCode, farmName, talhao, existing }) {
   }
 }
 
-// ---- Rendering and map logic ----
+// =============================
+// Rendering and map logic
+// =============================
 let currentFarmCode = "";
 let currentSelectedFeature = null;
 
@@ -857,7 +886,28 @@ function refreshCurrentCard() {
   }
 }
 
+function refreshMapStyles() {
+  if (!geoLayer) return;
+  geoLayer.eachLayer(layer => {
+    const feature = layer.feature;
+    const props = feature.properties || {};
+    const inf = (props["INF."] ?? props.INF ?? "").toString();
+    const { farmCode, talhao } = parseFarmName(inf);
+    const st = computeStatusForTalhao(farmCode, talhao);
+
+    let fillColor = "#60a5fa";
+    if (st === "Pendente") fillColor = "#f59e0b";
+    else if (st === "Em andamento") fillColor = "#9ca3af";
+    else if (st === "OK") fillColor = "#34d399";
+
+    layer.setStyle({ weight: 1, fillOpacity: 0.25, fillColor });
+  });
+}
+
 async function init() {
+  // 1) carrega cache de ocorrências (Supabase -> fallback local)
+  await refreshOccCache();
+
   map = L.map('map');
   window.__leafletMap = map;
 
@@ -868,13 +918,11 @@ async function init() {
 
   map.setView([-20.3, -49.2], 10);
 
-  // ✅ usar ./ para evitar bug de favorito/atalho no iPhone
   prod2025 = await (await fetch('./data/producao2025.json')).json();
   const kmlText = await (await fetch('./data/geral.kml')).text();
   const dom = new DOMParser().parseFromString(kmlText, 'text/xml');
   const geojson = toGeoJSON.kml(dom);
 
-  // organize by farm
   geojson.features.forEach(f => {
     const props = f.properties || {};
     const inf = (props["INF."] ?? props.INF ?? "").toString();
@@ -965,26 +1013,28 @@ async function init() {
     setTimeout(() => map.invalidateSize(), 250);
   }
 
-  select.addEventListener('change', e => drawFarm(e.target.value));
+  select.addEventListener('change', async e => {
+    const code = e.target.value;
+    await refreshOccCache({ farmCode: code || null }); // carrega do supabase dessa fazenda
+    drawFarm(code);
+  });
+
   document.getElementById("modeSelect").addEventListener('change', () => {
     drawFarm(select.value);
   });
+
   document.getElementById("profileSelect").addEventListener('change', () => {
     refreshCurrentCard();
   });
 
-  // ===== BOTÃO + (FAB) NO CELULAR =====
+  // FAB +
   const fab = document.getElementById("fabAdd");
   if (fab) {
     fab.addEventListener("click", () => {
       const farmCode = currentFarmCode || document.getElementById("farmSelect")?.value;
-      if (!farmCode) {
-        alert("Selecione uma fazenda primeiro.");
-        return;
-      }
+      if (!farmCode) { alert("Selecione uma fazenda primeiro."); return; }
 
       const mode = getMode();
-
       if (mode === "talhao") {
         if (!currentSelectedFeature) {
           alert("No modo Talhão, clique em um talhão no mapa antes de criar ocorrência.");
@@ -1006,6 +1056,7 @@ async function init() {
   const first = select.options[1]?.value;
   if (first) {
     select.value = first;
+    await refreshOccCache({ farmCode: first });
     drawFarm(first);
   }
 }
