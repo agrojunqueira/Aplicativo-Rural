@@ -109,7 +109,7 @@ async function guardSession() {
   const { data: perfil, error } = await sb
     .from("usuarios")
     .select("nome, role, empresa_id")
-    .eq("id", __user.id)
+    .eq("user_id", __user.id)
     .single();
 
   if (error) throw error;
