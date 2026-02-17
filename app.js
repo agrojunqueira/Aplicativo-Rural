@@ -197,7 +197,7 @@ async function fetchOccByFarm(farmCode) {
 
   if (error) throw error;
   const ids = (data || []).map(o => o.created_by);
-_userNameById = await loadUserNameMap(ids);
+__userNameById = await loadUserNameMap(ids);
   OCC_CACHE_BY_FARM.set(farmCode, data || []);
   return data || [];
 }
