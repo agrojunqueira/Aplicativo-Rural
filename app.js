@@ -25,8 +25,8 @@ try {
   sb = null;
 }
 
-function assertSb(){
-  if(!sb) throw new Error("Supabase não configurado no front.");
+function assertSb() {
+  if (!sb) throw new Error("Supabase não configurado no front.");
 }
 
 function uid() {
@@ -39,23 +39,48 @@ function uid() {
 }
 
 // =============================
+// STATUS HELPERS (PADRÃO DB)
+// =============================
+const STATUS = {
+  PENDENTE: "pendente",
+  EM_ANDAMENTO: "em_andamento",
+  FEITA: "feita",
+  CANCELADA: "cancelada",
+  OK: "ok",
+};
+
+function normStatus(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
+function statusLabel(s) {
+  const x = normStatus(s);
+  if (x === STATUS.PENDENTE) return "Pendente";
+  if (x === STATUS.EM_ANDAMENTO) return "Em andamento";
+  if (x === STATUS.FEITA) return "Feita";
+  if (x === STATUS.CANCELADA) return "Cancelada";
+  if (x === STATUS.OK) return "OK";
+  return s || "—";
+}
+
+// =============================
 // AUTH / PERFIL
 // =============================
 let __session = null;
 let __user = null;
 let __perfil = null; // {nome, role, empresa_id}
 
-async function guardSession(){
+async function guardSession() {
   assertSb();
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
-  if(!__session){
+  if (!__session) {
     window.location.href = "./login.html";
     throw new Error("Sem sessão.");
   }
   const { data: u } = await sb.auth.getUser();
   __user = u?.user || null;
-  if(!__user){
+  if (!__user) {
     window.location.href = "./login.html";
     throw new Error("Sem usuário.");
   }
@@ -66,16 +91,16 @@ async function guardSession(){
     .eq("id", __user.id)
     .single();
 
-  if(error) throw error;
+  if (error) throw error;
 
   __perfil = perfil;
-  if(__perfil?.empresa_id && __perfil.empresa_id !== EMPRESA_ID){
+  if (__perfil?.empresa_id && __perfil.empresa_id !== EMPRESA_ID) {
     console.warn("EMPRESA_ID no front diferente do perfil. Usando perfil:", __perfil.empresa_id);
   }
   return { user: __user, perfil: __perfil };
 }
 
-function isMaster(){
+function isMaster() {
   return (__perfil?.role || "user") === "master";
 }
 
@@ -131,14 +156,14 @@ async function uploadPhotosToSupabase({ files, farmCode, talhao, occId }) {
 
 // Cache em memória pra ficar rápido
 let OCC_CACHE_BY_FARM = new Map(); // farm_code -> ocorrencias[]
-let FARM_STATUS = new Map(); // farm_code -> "Pendente"|"Em andamento"|"OK"
+let FARM_STATUS = new Map(); // farm_code -> "pendente"|"em_andamento"|"ok"
 
-function normalizeFarmCode(x){
-  if(x === null || x === undefined) return null;
+function normalizeFarmCode(x) {
+  if (x === null || x === undefined) return null;
   return String(x);
 }
 
-async function fetchOccByFarm(farmCode){
+async function fetchOccByFarm(farmCode) {
   assertSb();
   farmCode = normalizeFarmCode(farmCode);
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
@@ -151,12 +176,12 @@ async function fetchOccByFarm(farmCode){
     .order("created_at", { ascending: false })
     .limit(2000);
 
-  if(error) throw error;
+  if (error) throw error;
   OCC_CACHE_BY_FARM.set(farmCode, data || []);
   return data || [];
 }
 
-async function fetchFarmStatuses(){
+async function fetchFarmStatuses() {
   assertSb();
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
 
@@ -168,45 +193,47 @@ async function fetchFarmStatuses(){
     .order("created_at", { ascending: false })
     .limit(5000);
 
-  if(error) throw error;
+  if (error) throw error;
 
-  const map = new Map(); // farm -> {pend:boolean, and:boolean}
-  for(const r of (data || [])){
+  const mapLocal = new Map(); // farm -> {pend:boolean, and:boolean}
+  for (const r of (data || [])) {
     const fc = normalizeFarmCode(r.farm_code);
-    if(!fc) continue;
-    if(r.cancelada) continue;
+    if (!fc) continue;
+    if (r.cancelada) continue;
 
-    if(!map.has(fc)) map.set(fc, { pend:false, and:false });
-    const st = r.status;
-    if(st === "Pendente") map.get(fc).pend = true;
-    if(st === "Em andamento") map.get(fc).and = true;
+    if (!mapLocal.has(fc)) mapLocal.set(fc, { pend: false, and: false });
+    const st = normStatus(r.status);
+
+    if (st === STATUS.PENDENTE) mapLocal.get(fc).pend = true;
+    if (st === STATUS.EM_ANDAMENTO) mapLocal.get(fc).and = true;
   }
 
   FARM_STATUS.clear();
-  for(const [fc, flags] of map.entries()){
-    if(flags.pend) FARM_STATUS.set(fc, "Pendente");
-    else if(flags.and) FARM_STATUS.set(fc, "Em andamento");
-    else FARM_STATUS.set(fc, "OK");
+  for (const [fc, flags] of mapLocal.entries()) {
+    if (flags.pend) FARM_STATUS.set(fc, STATUS.PENDENTE);
+    else if (flags.and) FARM_STATUS.set(fc, STATUS.EM_ANDAMENTO);
+    else FARM_STATUS.set(fc, STATUS.OK);
   }
 }
 
-function computeStatusForFarmFromCache(farmCode){
+function computeStatusForFarmFromCache(farmCode) {
   farmCode = normalizeFarmCode(farmCode);
   const s = FARM_STATUS.get(farmCode);
-  return s || "OK";
+  return s || STATUS.OK;
 }
 
-function computeStatusForTalhaoFromCache(farmCode, talhao){
+function computeStatusForTalhaoFromCache(farmCode, talhao) {
   farmCode = normalizeFarmCode(farmCode);
   talhao = talhao ? String(talhao) : null;
   const rows = OCC_CACHE_BY_FARM.get(farmCode) || [];
   const tal = rows.filter(o => !o.cancelada && String(o.talhao || "") === String(talhao || ""));
-  if (tal.some(o => o.status === "Pendente")) return "Pendente";
-  if (tal.some(o => o.status === "Em andamento")) return "Em andamento";
-  return "OK";
+
+  if (tal.some(o => normStatus(o.status) === STATUS.PENDENTE)) return STATUS.PENDENTE;
+  if (tal.some(o => normStatus(o.status) === STATUS.EM_ANDAMENTO)) return STATUS.EM_ANDAMENTO;
+  return STATUS.OK;
 }
 
-async function insertOccSupabaseFull(record){
+async function insertOccSupabaseFull(record) {
   assertSb();
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
 
@@ -219,7 +246,7 @@ async function insertOccSupabaseFull(record){
     pragas: record.pragas || [],
     matos: record.matos || [],
     observacao: record.observacao || null,
-    status: record.status || "Pendente",
+    status: normStatus(record.status || STATUS.PENDENTE),
     photos: record.photos || [],
     created_by: __user.id,
     cancelada: false
@@ -231,24 +258,26 @@ async function insertOccSupabaseFull(record){
     .select()
     .single();
 
-  if(error) throw error;
+  if (error) throw error;
   return data;
 }
 
-async function updateOccStatus({ id, status }){
+async function updateOccStatus({ id, status }) {
   assertSb();
+  const st = normStatus(status);
+
   const { data, error } = await sb
     .from("ocorrencias")
-    .update({ status })
+    .update({ status: st })
     .eq("id", id)
     .select()
     .single();
 
-  if(error) throw error;
+  if (error) throw error;
   return data;
 }
 
-async function updateOccFields({ id, patch }){
+async function updateOccFields({ id, patch }) {
   assertSb();
   const { data, error } = await sb
     .from("ocorrencias")
@@ -257,12 +286,12 @@ async function updateOccFields({ id, patch }){
     .select()
     .single();
 
-  if(error) throw error;
+  if (error) throw error;
   return data;
 }
 
-async function cancelOcc({ id }){
-  if(!isMaster()){
+async function cancelOcc({ id }) {
+  if (!isMaster()) {
     alert("Só Master pode cancelar ocorrência.");
     return;
   }
@@ -279,7 +308,7 @@ async function cancelOcc({ id }){
     .select()
     .single();
 
-  if(error) throw error;
+  if (error) throw error;
   return data;
 }
 
@@ -312,11 +341,13 @@ function formatNum(x, dec = 1) {
 }
 
 function statusBadge(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "pendente") return `<span class="badge orange">Pendente</span>`;
-  if (s === "em andamento") return `<span class="badge gray">Em andamento</span>`;
-  if (s === "feito") return `<span class="badge green">Feito</span>`;
-  return `<span class="badge gray">${status || "—"}</span>`;
+  const s = normStatus(status);
+  if (s === STATUS.PENDENTE) return `<span class="badge orange">Pendente</span>`;
+  if (s === STATUS.EM_ANDAMENTO) return `<span class="badge gray">Em andamento</span>`;
+  if (s === STATUS.FEITA) return `<span class="badge green">Feita</span>`;
+  if (s === STATUS.CANCELADA) return `<span class="badge gray">Cancelada</span>`;
+  if (s === STATUS.OK) return `<span class="badge green">OK</span>`;
+  return `<span class="badge gray">${escapeHtml(statusLabel(status))}</span>`;
 }
 
 function escapeHtml(s) {
@@ -363,7 +394,7 @@ function getMode() {
   return document.getElementById("modeSelect")?.value || "talhao";
 }
 
-function getProfileLabel(){
+function getProfileLabel() {
   return isMaster() ? "master" : "user";
 }
 
@@ -423,7 +454,7 @@ async function renderTalhaoCard(feature) {
       <span class="pill"><b>COD</b> ${layerId || "—"}</span>
       <span class="pill"><b>Fazenda</b> ${farmCode || "—"} — ${farmName || "—"}</span>
       <span class="pill"><b>Talhão</b> ${talhao || props.TALHAO || "—"}</span>
-      <span class="pill"><b>Status</b> ${status}</span>
+      <span class="pill"><b>Status</b> ${statusLabel(status)}</span>
       <span class="pill"><b>Perfil</b> ${getProfileLabel()}</span>
       <a class="pill" href="./dashboard.html">📊 Dashboard</a>
     </div>
@@ -441,7 +472,7 @@ async function renderTalhaoCard(feature) {
         <button class="secondary" id="btnRefreshOcc">Atualizar</button>
         <button class="secondary" id="btnLogout">Sair</button>
       </div>
-      <div class="small" style="margin-top:8px;">“Feito” e “Cancelar” só Master.</div>
+      <div class="small" style="margin-top:8px;">“Feita” e “Cancelar” só Master.</div>
       <div id="occList"></div>
     </div>
   `;
@@ -488,7 +519,7 @@ async function renderFarmCard(farmCode) {
   card.innerHTML = `
     <div class="topline">
       <span class="pill"><b>Fazenda</b> ${farmCode} — ${farm.name}</span>
-      <span class="pill"><b>Status</b> ${status}</span>
+      <span class="pill"><b>Status</b> ${statusLabel(status)}</span>
       <span class="pill"><b>Talhões</b> ${farm.features.length}</span>
       <span class="pill"><b>Perfil</b> ${getProfileLabel()}</span>
       <a class="pill" href="./dashboard.html">📊 Dashboard</a>
@@ -508,7 +539,7 @@ async function renderFarmCard(farmCode) {
         <button class="secondary" id="btnRefreshOccFarm">Atualizar</button>
         <button class="secondary" id="btnLogout">Sair</button>
       </div>
-      <div class="small" style="margin-top:8px;">“Feito” e “Cancelar” só Master.</div>
+      <div class="small" style="margin-top:8px;">“Feita” e “Cancelar” só Master.</div>
       <div id="occList"></div>
     </div>
   `;
@@ -565,11 +596,13 @@ async function renderOccList({ farmCode, talhao }) {
     const canCancel = isMaster();
     const cancelBtn = canCancel ? `<button class="secondary" onclick="window.__cancelOcc('${o.id}')">Cancelar</button>` : ``;
 
+    const st = normStatus(o.status);
+
     return `
       <div class="occ-item">
         <div class="occ-head">
           <div><b>${escapeHtml(o.cultura || "—")}</b> • ${where} • <span class="small">${dtStr}</span></div>
-          ${statusBadge(o.status)}
+          ${statusBadge(st)}
         </div>
 
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
@@ -579,9 +612,9 @@ async function renderOccList({ farmCode, talhao }) {
 
         <div class="row" style="margin-top:8px;">
           <select data-id="${o.id}" class="statusSel" style="flex:1;">
-            <option value="Pendente" ${o.status === "Pendente" ? "selected" : ""}>Pendente</option>
-            <option value="Em andamento" ${o.status === "Em andamento" ? "selected" : ""}>Em andamento</option>
-            <option value="Feito" ${o.status === "Feito" ? "selected" : ""}>Feito</option>
+            <option value="${STATUS.PENDENTE}" ${st === STATUS.PENDENTE ? "selected" : ""}>Pendente</option>
+            <option value="${STATUS.EM_ANDAMENTO}" ${st === STATUS.EM_ANDAMENTO ? "selected" : ""}>Em andamento</option>
+            <option value="${STATUS.FEITA}" ${st === STATUS.FEITA ? "selected" : ""}>Feita</option>
           </select>
           ${cancelBtn}
         </div>
@@ -592,21 +625,21 @@ async function renderOccList({ farmCode, talhao }) {
   wrap.querySelectorAll(".statusSel").forEach(sel => {
     sel.onchange = async () => {
       const id = sel.getAttribute("data-id");
-      const next = sel.value;
+      const next = normStatus(sel.value);
 
-      if (next === "Feito" && !isMaster()) {
-        alert("Só Master pode finalizar como FEITO.");
-        sel.value = "Em andamento";
+      if (next === STATUS.FEITA && !isMaster()) {
+        alert("Só Master pode finalizar como FEITA.");
+        sel.value = STATUS.EM_ANDAMENTO;
         return;
       }
 
-      try{
+      try {
         await updateOccStatus({ id, status: next });
         await fetchOccByFarm(farmCode);
         await fetchFarmStatuses();
         await refreshCurrentCard();
         repaintMapColors();
-      }catch(e){
+      } catch (e) {
         alert("Erro ao atualizar status: " + (e?.message || e));
         console.error(e);
       }
@@ -616,7 +649,7 @@ async function renderOccList({ farmCode, talhao }) {
 
 window.__openPhotoViewer = (occId, startIdx = 0) => {
   const all = [];
-  for(const arr of OCC_CACHE_BY_FARM.values()) all.push(...arr);
+  for (const arr of OCC_CACHE_BY_FARM.values()) all.push(...arr);
   const occ = all.find(o => o.id === occId);
   if (!occ || !occ.photos || !occ.photos.length) return;
 
@@ -651,23 +684,23 @@ window.__openPhotoViewer = (occId, startIdx = 0) => {
 };
 
 window.__cancelOcc = async (id) => {
-  if(!confirm("Cancelar essa ocorrência? (fica no histórico como cancelada)")) return;
-  try{
+  if (!confirm("Cancelar essa ocorrência? (fica no histórico como cancelada)")) return;
+  try {
     const farmCode = currentFarmCode;
     await cancelOcc({ id });
     await fetchOccByFarm(farmCode);
     await fetchFarmStatuses();
     await refreshCurrentCard();
     repaintMapColors();
-  }catch(e){
+  } catch (e) {
     alert("Erro ao cancelar: " + (e?.message || e));
     console.error(e);
   }
 };
 
-function openPendReport(farmCode){
+function openPendReport(farmCode) {
   const rows = (OCC_CACHE_BY_FARM.get(normalizeFarmCode(farmCode)) || [])
-    .filter(o => !o.cancelada && o.status !== "Feito");
+    .filter(o => !o.cancelada && [STATUS.PENDENTE, STATUS.EM_ANDAMENTO].includes(normStatus(o.status)));
 
   const groups = new Map();
   for (const o of rows) {
@@ -677,12 +710,12 @@ function openPendReport(farmCode){
   }
 
   const html = [...groups.entries()].map(([k, arr]) => {
-    arr.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+    arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const items = arr.slice(0, 12).map(o => {
       const dt = new Date(o.created_at).toLocaleString("pt-BR");
       return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:8px;margin-top:6px;">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
-          <div><b>${escapeHtml(o.cultura||"—")}</b> • <span class="small">${dt}</span></div>
+          <div><b>${escapeHtml(o.cultura || "—")}</b> • <span class="small">${dt}</span></div>
           ${statusBadge(o.status)}
         </div>
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
@@ -738,12 +771,11 @@ function openOccForm({ farmCode, farmName, talhao }) {
 
       <label>Status</label>
       <select id="status">
-        <select id="status">
-  <option value="pendente">Pendente</option>
-  <option value="feita">Feita</option>
-  <option value="cancelada">Cancelada</option>
-</select>
-    
+        <option value="${STATUS.PENDENTE}" selected>Pendente</option>
+        <option value="${STATUS.EM_ANDAMENTO}">Em andamento</option>
+        <option value="${STATUS.FEITA}">Feita</option>
+        <option value="${STATUS.CANCELADA}">Cancelada</option>
+      </select>
 
       <label>Fotos (opcional)</label>
       <input id="photos" type="file" multiple accept="image/*"/>
@@ -751,30 +783,32 @@ function openOccForm({ farmCode, farmName, talhao }) {
       <div class="small" style="margin-top:8px;">Dica: fotos grandes demoram. Suba poucas.</div>
     `,
     onSave: async () => {
-      try{
+      try {
         const cultura = document.getElementById("cultura").value.trim();
         const pragas = document.getElementById("pragas").value.split(",").map(s => s.trim()).filter(Boolean);
         const matos = document.getElementById("matos").value.split(",").map(s => s.trim()).filter(Boolean);
         const obs = document.getElementById("obs").value.trim();
-        let status = document.getElementById("status").value;
 
-        if(!obs){
+        let status = normStatus(document.getElementById("status").value);
+
+        if (!obs) {
           alert("Observação é obrigatória.");
           return false;
         }
-        if(status === "Feito" && !isMaster()){
-          alert("Só Master pode finalizar como FEITO.");
-          status = "Pendente";
+
+        if (status === STATUS.FEITA && !isMaster()) {
+          alert("Só Master pode finalizar como FEITA.");
+          status = STATUS.EM_ANDAMENTO;
         }
 
         const occId = uid();
         const files = [...(document.getElementById("photos").files || [])].slice(0, 6);
 
         let photos = [];
-        if(files.length){
+        if (files.length) {
           const { urls, errors } = await uploadPhotosToSupabase({ files, farmCode, talhao, occId });
           photos = urls;
-          if(errors.length){
+          if (errors.length) {
             console.warn("Erros no upload:", errors);
             alert("Algumas fotos podem não ter subido. Veja o console (F12).");
           }
@@ -800,7 +834,7 @@ function openOccForm({ farmCode, farmName, talhao }) {
         repaintMapColors();
 
         return true;
-      }catch(e){
+      } catch (e) {
         alert("Erro ao salvar: " + (e?.message || e));
         console.error(e);
         return false;
@@ -812,26 +846,26 @@ function openOccForm({ farmCode, farmName, talhao }) {
 // =============================
 // MAP / INIT
 // =============================
-function repaintMapColors(){
-  if(!geoLayer) return;
-  geoLayer.eachLayer(layer=>{
+function repaintMapColors() {
+  if (!geoLayer) return;
+  geoLayer.eachLayer(layer => {
     const feature = layer.feature;
     const props = feature?.properties || {};
     const inf = (props["INF."] ?? props.INF ?? "").toString();
     const { farmCode, talhao } = parseFarmName(inf);
 
     const mode = getMode();
-    if(mode === "fazenda"){
+    if (mode === "fazenda") {
       const st = computeStatusForFarmFromCache(farmCode);
       let fillColor = "#34d399";
-      if (st === "Pendente") fillColor = "#f59e0b";
-      else if (st === "Em andamento") fillColor = "#9ca3af";
+      if (st === STATUS.PENDENTE) fillColor = "#f59e0b";
+      else if (st === STATUS.EM_ANDAMENTO) fillColor = "#9ca3af";
       layer.setStyle({ weight: 1, fillOpacity: 0.20, fillColor });
-    }else{
+    } else {
       const st = computeStatusForTalhaoFromCache(farmCode, talhao);
       let fillColor = "#34d399";
-      if (st === "Pendente") fillColor = "#f59e0b";
-      else if (st === "Em andamento") fillColor = "#9ca3af";
+      if (st === STATUS.PENDENTE) fillColor = "#f59e0b";
+      else if (st === STATUS.EM_ANDAMENTO) fillColor = "#9ca3af";
       layer.setStyle({ weight: 1, fillOpacity: 0.25, fillColor });
     }
   });
@@ -878,7 +912,7 @@ async function init() {
       select.appendChild(opt);
     });
 
-  function drawAllFarms(){
+  function drawAllFarms() {
     clearFarmLabel();
     currentSelectedFeature = null;
     currentFarmCode = "";
@@ -894,20 +928,20 @@ async function init() {
         const { farmCode, talhao } = parseFarmName(inf);
 
         const mode = getMode();
-        let st = "OK";
-        if(mode === "fazenda") st = computeStatusForFarmFromCache(farmCode);
+        let st = STATUS.OK;
+        if (mode === "fazenda") st = computeStatusForFarmFromCache(farmCode);
         else st = computeStatusForTalhaoFromCache(farmCode, talhao);
 
         let fillColor = "#34d399";
-        if (st === "Pendente") fillColor = "#f59e0b";
-        else if (st === "Em andamento") fillColor = "#9ca3af";
+        if (st === STATUS.PENDENTE) fillColor = "#f59e0b";
+        else if (st === STATUS.EM_ANDAMENTO) fillColor = "#9ca3af";
         return { weight: 1, fillOpacity: 0.20, fillColor };
       },
       onEachFeature: (feature, layer) => {
         layer.on('click', async () => {
           const props = feature.properties || {};
           const inf = (props["INF."] ?? props.INF ?? "").toString();
-          const { farmCode, farmName, talhao } = parseFarmName(inf);
+          const { farmCode } = parseFarmName(inf);
 
           const mode = getMode();
 
@@ -957,8 +991,8 @@ async function init() {
         const st = computeStatusForTalhaoFromCache(farmCode, talhao);
 
         let fillColor = "#34d399";
-        if (st === "Pendente") fillColor = "#f59e0b";
-        else if (st === "Em andamento") fillColor = "#9ca3af";
+        if (st === STATUS.PENDENTE) fillColor = "#f59e0b";
+        else if (st === STATUS.EM_ANDAMENTO) fillColor = "#9ca3af";
 
         return { weight: 1, fillOpacity: 0.25, fillColor };
       },
