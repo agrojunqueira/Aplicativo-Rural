@@ -340,18 +340,21 @@ function formatNum(x, dec = 1) {
   return Number(x).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
 
-function statusBadge(status) {
-  const s = normStatus(status);
-  if (s === STATUS.PENDENTE) return `<span class="badge orange">Pendente</span>`;
-  if (s === STATUS.EM_ANDAMENTO) return `<span class="badge gray">Em andamento</span>`;
-  if (s === STATUS.FEITA) return `<span class="badge green">Feita</span>`;
-  if (s === STATUS.CANCELADA) return `<span class="badge gray">Cancelada</span>`;
-  if (s === STATUS.OK) return `<span class="badge green">OK</span>`;
-  return `<span class="badge gray">${escapeHtml(statusLabel(status))}</span>`;
+function statusLabel(s){
+  if(s === "pendente") return "Pendente";
+  if(s === "em_andamento") return "Em andamento";
+  if(s === "feita") return "Feita";
+  if(s === "cancelada") return "Cancelada";
+  return s || "—";
 }
 
-function escapeHtml(s) {
-  return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function statusBadge(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "pendente") return `<span class="badge orange">Pendente</span>`;
+  if (s === "em_andamento") return `<span class="badge gray">Em andamento</span>`;
+  if (s === "feita") return `<span class="badge green">Feita</span>`;
+  if (s === "cancelada") return `<span class="badge red">Cancelada</span>`;
+  return `<span class="badge gray">${statusLabel(status)}</span>`;
 }
 
 // ---- Modal ----
