@@ -78,6 +78,7 @@ async function guardSession() {
     window.location.href = "./login.html";
     throw new Error("Sem sessão.");
   }
+
   const { data: u } = await sb.auth.getUser();
   __user = u?.user || null;
   if (!__user) {
@@ -185,7 +186,6 @@ async function fetchFarmStatuses() {
   assertSb();
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
 
-  // pega só o que importa pro status do mapa
   const { data, error } = await sb
     .from("ocorrencias")
     .select("farm_code, status, cancelada")
@@ -340,20 +340,23 @@ function formatNum(x, dec = 1) {
   return Number(x).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
 
-function statusLabel(s){
-  if(s === "pendente") return "Pendente";
-  if(s === "em_andamento") return "Em andamento";
-  if(s === "feita") return "Feita";
-  if(s === "cancelada") return "Cancelada";
-  return s || "—";
+// ✅ FALTAVA no seu código (e você usa em vários lugares)
+function escapeHtml(s) {
+  return String(s || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[c]));
 }
 
 function statusBadge(status) {
-  const s = (status || "").toLowerCase();
-  if (s === "pendente") return `<span class="badge orange">Pendente</span>`;
-  if (s === "em_andamento") return `<span class="badge gray">Em andamento</span>`;
-  if (s === "feita") return `<span class="badge green">Feita</span>`;
-  if (s === "cancelada") return `<span class="badge red">Cancelada</span>`;
+  const s = normStatus(status);
+  if (s === STATUS.PENDENTE) return `<span class="badge orange">Pendente</span>`;
+  if (s === STATUS.EM_ANDAMENTO) return `<span class="badge gray">Em andamento</span>`;
+  if (s === STATUS.FEITA) return `<span class="badge green">Feita</span>`;
+  if (s === STATUS.CANCELADA) return `<span class="badge red">Cancelada</span>`;
   return `<span class="badge gray">${statusLabel(status)}</span>`;
 }
 
@@ -402,7 +405,7 @@ function getProfileLabel() {
 }
 
 // =============================
-// UI: Ocorrências (agora do DB)
+// UI: Ocorrências
 // =============================
 let currentFarmCode = "";
 let currentSelectedFeature = null;
@@ -441,7 +444,6 @@ async function renderTalhaoCard(feature) {
   const inf = (props["INF."] ?? props.INF ?? "").toString();
   const { farmCode, farmName, talhao } = parseFarmName(inf);
 
-  // garante cache da fazenda
   await fetchOccByFarm(farmCode);
 
   const chave = chaveFromProps(props);
@@ -719,7 +721,7 @@ function openPendReport(farmCode) {
       return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:8px;margin-top:6px;">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
           <div><b>${escapeHtml(o.cultura || "—")}</b> • <span class="small">${dt}</span></div>
-          ${statusBadge(o.status)}
+          ${statusBadge(normStatus(o.status))}
         </div>
         <div class="small" style="margin-top:6px;"><b>Obs:</b> ${escapeHtml(o.observacao || "—")}</div>
       </div>`;
@@ -791,7 +793,6 @@ function openOccForm({ farmCode, farmName, talhao }) {
         const pragas = document.getElementById("pragas").value.split(",").map(s => s.trim()).filter(Boolean);
         const matos = document.getElementById("matos").value.split(",").map(s => s.trim()).filter(Boolean);
         const obs = document.getElementById("obs").value.trim();
-
         let status = normStatus(document.getElementById("status").value);
 
         if (!obs) {
