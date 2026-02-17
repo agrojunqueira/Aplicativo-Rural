@@ -1034,19 +1034,34 @@ async function loadUserNameMap(createdByIds) {
   const ids = [...new Set((createdByIds || []).filter(Boolean))];
   if (!ids.length) return {};
 
-  const { data, error } = await sb
+ const { data: perfil, error } = await sb
+  .from("usuarios")
+  .select("nome, role, empresa_id")
+  .eq("user_id", user.id)
+  .maybeSingle();
+
+if (error) throw error;
+
+let finalPerfil = perfil;
+
+if (!finalPerfil) {
+  // cria automaticamente se não existir
+  const payload = {
+    user_id: user.id,
+    empresa_id: EMPRESA_ID,                 // ou o default que você usa
+    nome: user.email || "Usuário",
+    role: "user",
+  };
+
+  const { data: novo, error: e2 } = await sb
     .from("usuarios")
-    .select("id, nome")
-    .in("id", ids);
+    .insert(payload)
+    .select("nome, role, empresa_id")
+    .single();
 
-  if (error) {
-    console.warn("Falha ao buscar nomes em usuarios:", error);
-    return {};
-  }
-
-  const map = {};
-  for (const row of (data || [])) {
-    map[row.id] = row.nome;
-  }
-  return map;
+  if (e2) throw e2;
+  finalPerfil = novo;
 }
+
+// usa finalPerfil no resto do app
+__perfil = finalPerfil;
