@@ -1036,8 +1036,8 @@ async function loadUserNameMap(createdByIds) {
 
   const { data, error } = await sb
     .from("usuarios")
-.select("user_id, nome")
-    .in("user_id", ids);
+    .select("id, nome")
+    .in("id", ids);
 
   if (error) {
     console.warn("Falha ao buscar nomes em usuarios:", error);
@@ -1046,7 +1046,7 @@ async function loadUserNameMap(createdByIds) {
 
   const map = {};
   for (const row of (data || [])) {
-   map[row.user_id] = row.nome;
+    map[row.id] = row.nome;
   }
   return map;
 }
