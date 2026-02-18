@@ -178,21 +178,19 @@ function getProfileLabel() {
 // =============================
 // NOMES (created_by -> nome)
 // =============================
-async function loadUserNameMap(createdByIds) {
+  async function loadUserNameMap(createdByIds) {
   assertSb();
-  const ids = [...new Set((createdByIds || []).filter(Boolean))];
+
+const ids = [...new Set((createdByIds || []).filter(Boolean))];
   if (!ids.length) return {};
 
-  // Busca nomes dos usuários que criaram ocorrência
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
 
   const { data, error } = await sb
     .from("usuarios")
-    .select("id, nome, empresa_id")
-...
-.in("id", ids);
+    .select("id, nome")
     .eq("empresa_id", empresa)
-    .in("user_id", ids);
+    .in("id", ids);
 
   if (error) throw error;
 
