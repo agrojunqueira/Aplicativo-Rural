@@ -19,7 +19,8 @@ console.log("SUPABASE_KEY_IS_EYJ:", (SUPABASE_ANON_KEY || "").startsWith("eyJ"))
 let sb = null;
 try {
   if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    window.__sb = window.__sb || window.supabase.createClient(url, key);
+const sb = window.__sb;
   }
 } catch (e) {
   sb = null;
