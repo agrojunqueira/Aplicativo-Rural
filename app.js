@@ -96,20 +96,6 @@ let __userNameById = {}; // created_by(user_id) -> nome
 async function guardSession() {
   assertSb();
 
- // =============================
-// AUTH / PERFIL
-// =============================
-// =============================
-// AUTH / PERFIL
-// =============================
-let __session = null;
-let __user = null;
-let __perfil = null; // {nome, role, empresa_id}
-let __userNameById = {}; // created_by(user_id) -> nome
-
-async function guardSession() {
-  assertSb();
-
   // 1) sessão
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
@@ -178,10 +164,10 @@ function getProfileLabel() {
 // =============================
 // NOMES (created_by -> nome)
 // =============================
-  async function loadUserNameMap(createdByIds) {
+async function loadUserNameMap(createdByIds) {
   assertSb();
 
-const ids = [...new Set((createdByIds || []).filter(Boolean))];
+  const ids = [...new Set((createdByIds || []).filter(Boolean))];
   if (!ids.length) return {};
 
   const empresa = __perfil?.empresa_id || EMPRESA_ID;
@@ -273,7 +259,7 @@ async function fetchOccByFarm(farmCode) {
 
   if (error) throw error;
 
-  const ids = (data || []).map(o => o.created_by);
+  const ids = (data || []).map(o => o.created_by).filter(Boolean);
   __userNameById = await loadUserNameMap(ids);
 
   OCC_CACHE_BY_FARM.set(farmCode, data || []);
@@ -338,22 +324,22 @@ async function insertOccSupabaseFull(record) {
   const { data: u } = await sb.auth.getUser();
   const userId = u?.user?.id || __user?.id;
 
-  // garante perfil do usuário (caso ele nunca tenha aberto o app)
-  const displayName =
-    (__perfil?.nome || __user?.email || "Usuário");
+  // garante perfil do usuário
+  const displayName = (__perfil?.nome || __user?.email || "Usuário");
 
-  await sb
-  await sb
-  .from("usuarios")
-  .upsert(
-    [{
-      empresa_id: (__perfil?.empresa_id || EMPRESA_ID),
-      id: userId,
-      nome: displayName,
-      role: (__perfil?.role || "user")
-    }],
-    { onConflict: "id" }
-  );
+  const { error: upUserErr } = await sb
+    .from("usuarios")
+    .upsert(
+      [{
+        empresa_id: (__perfil?.empresa_id || EMPRESA_ID),
+        id: userId,
+        nome: displayName,
+        role: (__perfil?.role || "user")
+      }],
+      { onConflict: "id" }
+    );
+
+  if (upUserErr) throw upUserErr;
 
   const payload = {
     id: record.id,
@@ -404,7 +390,7 @@ async function cancelOcc({ id }) {
 
   const patch = {
     cancelada: true,
-    cancelada_por: __user.id,
+    cancelada_por: __user?.id || null,
     cancelada_em: new Date().toISOString()
   };
 
@@ -678,8 +664,7 @@ async function renderOccList({ farmCode, talhao }) {
       : "";
 
     const dtStr = new Date(o.created_at).toLocaleString("pt-BR");
-    const canCancel = isMaster();
-    const cancelBtn = canCancel ? `<button class="secondary" onclick="window.__cancelOcc('${o.id}')">Cancelar</button>` : ``;
+    const cancelBtn = isMaster() ? `<button class="secondary" onclick="window.__cancelOcc('${o.id}')">Cancelar</button>` : ``;
 
     const st = normStatus(o.status);
 
