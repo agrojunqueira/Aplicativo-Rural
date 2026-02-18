@@ -104,13 +104,13 @@ async function guardSession() {
 // =============================
 let __session = null;
 let __user = null;
-let __perfil = null; 
-let __userNameById = {};
+let __perfil = null; // {nome, role, empresa_id}
+let __userNameById = {}; // created_by(user_id) -> nome
 
 async function guardSession() {
   assertSb();
 
-  // sessão
+  // 1) sessão
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
 
@@ -119,18 +119,17 @@ async function guardSession() {
     throw new Error("Sem sessão.");
   }
 
-  // user
+  // 2) user
   const { data: u, error: userErr } = await sb.auth.getUser();
   if (userErr) throw userErr;
 
   __user = u?.user || null;
-
   if (!__user) {
     window.location.href = "./login.html";
     throw new Error("Sem usuário.");
   }
 
-  // perfil
+  // 3) perfil (usuarios.id = auth.user.id)
   const { data: perfil, error: perfilErr } = await sb
     .from("usuarios")
     .select("nome, role, empresa_id, id")
@@ -139,8 +138,8 @@ async function guardSession() {
 
   if (perfilErr) throw perfilErr;
 
+  // 4) se não existir, cria
   let finalPerfil = perfil;
-
   if (!finalPerfil) {
     const payload = {
       id: __user.id,
@@ -157,19 +156,6 @@ async function guardSession() {
 
     if (upErr) throw upErr;
     finalPerfil = up;
-  }
-
-  __perfil = finalPerfil;
-}
-
-    const { data: novo, error: e2 } = await sb
-      .from("usuarios")
-      .upsert([payload], { onConflict: "user_id" })
-      .select("nome, role, empresa_id, user_id")
-      .single();
-
-    if (e2) throw e2;
-    finalPerfil = novo;
   }
 
   __perfil = finalPerfil;
@@ -202,7 +188,9 @@ async function loadUserNameMap(createdByIds) {
 
   const { data, error } = await sb
     .from("usuarios")
-    .select("user_id, nome, empresa_id")
+    .select("id, nome, empresa_id")
+...
+.in("id", ids);
     .eq("empresa_id", empresa)
     .in("user_id", ids);
 
@@ -210,7 +198,7 @@ async function loadUserNameMap(createdByIds) {
 
   const out = {};
   for (const r of (data || [])) {
-    out[r.user_id] = r.nome || r.user_id;
+    out[r.id] = r.nome || r.id;
   }
   return out;
 }
@@ -357,16 +345,17 @@ async function insertOccSupabaseFull(record) {
     (__perfil?.nome || __user?.email || "Usuário");
 
   await sb
-    .from("usuarios")
-    .upsert(
-      [{
-        empresa_id: (__perfil?.empresa_id || EMPRESA_ID),
-        user_id: userId,
-        nome: displayName,
-        role: (__perfil?.role || "user")
-      }],
-      { onConflict: "user_id" }
-    );
+  await sb
+  .from("usuarios")
+  .upsert(
+    [{
+      empresa_id: (__perfil?.empresa_id || EMPRESA_ID),
+      id: userId,
+      nome: displayName,
+      role: (__perfil?.role || "user")
+    }],
+    { onConflict: "id" }
+  );
 
   const payload = {
     id: record.id,
