@@ -17,12 +17,14 @@ console.log("SUPABASE_KEY_PREFIX:", (SUPABASE_ANON_KEY || "").slice(0, 20));
 console.log("SUPABASE_KEY_IS_EYJ:", (SUPABASE_ANON_KEY || "").startsWith("eyJ"));
 
 let sb = null;
+
 try {
   if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
-    window.__sb = window.__sb || window.supabase.createClient(url, key);
-const sb = window.__sb;
+    window.__sb = window.__sb || window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb = window.__sb;
   }
 } catch (e) {
+  console.error("Erro ao criar Supabase client:", e);
   sb = null;
 }
 
@@ -96,6 +98,7 @@ async function guardSession() {
 
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
+
   if (!__session) {
     window.location.href = "./login.html";
     throw new Error("Sem sessão.");
@@ -103,11 +106,12 @@ async function guardSession() {
 
   const { data: u } = await sb.auth.getUser();
   __user = u?.user || null;
+
   if (!__user) {
     window.location.href = "./login.html";
     throw new Error("Sem usuário.");
   }
-
+}
   // 1) tenta pegar perfil (SEM quebrar quando não existir)
   const { data: perfil, error } = await sb
     .from("usuarios")
