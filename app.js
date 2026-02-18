@@ -99,15 +99,18 @@ async function guardSession() {
  // =============================
 // AUTH / PERFIL
 // =============================
+// =============================
+// AUTH / PERFIL
+// =============================
 let __session = null;
 let __user = null;
-let __perfil = null; // {nome, role, empresa_id}
-let __userNameById = {}; // created_by(user_id) -> nome
+let __perfil = null; 
+let __userNameById = {};
 
 async function guardSession() {
   assertSb();
 
-  // 1) sessão
+  // sessão
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
 
@@ -116,30 +119,31 @@ async function guardSession() {
     throw new Error("Sem sessão.");
   }
 
-  // 2) user
+  // user
   const { data: u, error: userErr } = await sb.auth.getUser();
   if (userErr) throw userErr;
 
   __user = u?.user || null;
+
   if (!__user) {
     window.location.href = "./login.html";
     throw new Error("Sem usuário.");
   }
 
-  // 3) tenta pegar perfil (SEM quebrar quando não existir)
+  // perfil
   const { data: perfil, error: perfilErr } = await sb
     .from("usuarios")
-    .select("nome, role, empresa_id, id") // <- usa id (não user_id)
+    .select("nome, role, empresa_id, id")
     .eq("id", __user.id)
     .maybeSingle();
 
   if (perfilErr) throw perfilErr;
 
-  // 4) se não existir, cria (upsert)
   let finalPerfil = perfil;
+
   if (!finalPerfil) {
     const payload = {
-      id: __user.id,          // <- chave principal
+      id: __user.id,
       empresa_id: EMPRESA_ID,
       nome: __user.email || "Usuário",
       role: "user",
