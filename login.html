@@ -49,6 +49,32 @@
     const EMPRESA_ID = "agrojunqueira";
 
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    async function ensureProfile(sb, empresaId, nome = "") {
+  const { data: userData } = await sb.auth.getUser();
+  const uid = userData?.user?.id;
+  if (!uid) return null;
+
+  const { data: profile } = await sb
+    .from("usuarios")
+    .select("id, empresa_id, role, nome")
+    .eq("id", uid)
+    .maybeSingle();
+
+  if (!profile) {
+    await sb.rpc("ensure_user_profile", {
+      p_empresa_id: empresaId,
+      p_nome: nome || ""
+    });
+  }
+
+  const { data: profile2 } = await sb
+    .from("usuarios")
+    .select("id, empresa_id, role, nome")
+    .eq("id", uid)
+    .single();
+
+  return profile2;
+}
 
     const msg = (txt, ok=false) => {
       const el = document.getElementById("msg");
@@ -116,6 +142,16 @@
 
         const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
         if (error) throw error;
+        if (!error) {
+  const profile = await ensureProfile(sb, "agrojunqueira", data.user.email);
+
+  // (opcional) salvar em memória pra usar no app
+  // localStorage.setItem("user_role", profile?.role || "user");
+  // localStorage.setItem("empresa_id", profile?.empresa_id || "agrojunqueira");
+
+  window.location.href = "./index.html";
+  return;
+}
 
         await ensureProfile(nome);
 
