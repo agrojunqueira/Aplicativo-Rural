@@ -96,6 +96,18 @@ let __userNameById = {}; // created_by(user_id) -> nome
 async function guardSession() {
   assertSb();
 
+ // =============================
+// AUTH / PERFIL
+// =============================
+let __session = null;
+let __user = null;
+let __perfil = null; // {nome, role, empresa_id}
+let __userNameById = {}; // created_by(user_id) -> nome
+
+async function guardSession() {
+  assertSb();
+
+  // 1) sessão
   const { data } = await sb.auth.getSession();
   __session = data?.session || null;
 
@@ -104,32 +116,47 @@ async function guardSession() {
     throw new Error("Sem sessão.");
   }
 
-  const { data: u } = await sb.auth.getUser();
-  __user = u?.user || null;
+  // 2) user
+  const { data: u, error: userErr } = await sb.auth.getUser();
+  if (userErr) throw userErr;
 
+  __user = u?.user || null;
   if (!__user) {
     window.location.href = "./login.html";
     throw new Error("Sem usuário.");
   }
-}
-  // 1) tenta pegar perfil (SEM quebrar quando não existir)
-  const { data: perfil, error } = await sb
+
+  // 3) tenta pegar perfil (SEM quebrar quando não existir)
+  const { data: perfil, error: perfilErr } = await sb
     .from("usuarios")
-    .select("nome, role, empresa_id, user_id")
-    .eq("user_id", __user.id)
+    .select("nome, role, empresa_id, id") // <- usa id (não user_id)
+    .eq("id", __user.id)
     .maybeSingle();
 
-  if (error) throw error;
+  if (perfilErr) throw perfilErr;
 
-  // 2) se não existir, cria (upsert)
+  // 4) se não existir, cria (upsert)
   let finalPerfil = perfil;
   if (!finalPerfil) {
     const payload = {
-      user_id: __user.id,
+      id: __user.id,          // <- chave principal
       empresa_id: EMPRESA_ID,
       nome: __user.email || "Usuário",
       role: "user",
     };
+
+    const { data: up, error: upErr } = await sb
+      .from("usuarios")
+      .upsert(payload, { onConflict: "id" })
+      .select("nome, role, empresa_id")
+      .single();
+
+    if (upErr) throw upErr;
+    finalPerfil = up;
+  }
+
+  __perfil = finalPerfil;
+}
 
     const { data: novo, error: e2 } = await sb
       .from("usuarios")
