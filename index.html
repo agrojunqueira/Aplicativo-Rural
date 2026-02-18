@@ -177,7 +177,8 @@
           return;
         }
 
-        const sb = window.supabase.createClient(url, key);
+     window.__sb = window.__sb || window.supabase.createClient(url, key);
+const sb = window.__sb;
         const { data, error } = await sb.auth.getSession();
         if (error) console.warn(error);
 
