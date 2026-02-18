@@ -93,8 +93,10 @@
       const payload = {
         id: user.id,
         empresa_id: EMPRESA_ID,
-        nome: (nomeDigitado && nomeDigitado.trim()) ? nomeDigitado.trim() : (user.email || "Usuário"),
-        role: "user"
+      nome: (typeof nomeDigitado === "string"
+  ? nomeDigitado
+  : (nomeDigitado?.value ?? "")
+).trim() || (user.email || "Usuário"),
       };
 
       const { error } = await sb
@@ -119,7 +121,7 @@
 
         // Em muitos casos o signUp NÃO cria session na hora (depende de confirmação de email)
         if (data?.session) {
-          await ensureProfile(nome);
+await ensureProfile(nome);
           msg("Cadastro OK. Indo pro mapa...", true);
           window.location.href = "./index.html";
           return;
