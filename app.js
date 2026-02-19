@@ -14,8 +14,11 @@ const FOTOS_BUCKET = window.__FOTOS_BUCKET || "ocorrencias-fotos";
 
 console.log("SUPABASE_URL:", SUPABASE_URL);
 console.log("SUPABASE_KEY_PREFIX:", (SUPABASE_ANON_KEY || "").slice(0, 20));
-console.log("SUPABASE_KEY_IS_EYJ:", (SUPABASE_ANON_KEY || "").startsWith("eyJ"));
-
+console.log(
+  "SUPABASE_KEY_IS_VALID:",
+  (SUPABASE_ANON_KEY || "").startsWith("eyJ") ||
+  (SUPABASE_ANON_KEY || "").startsWith("sb_publishable_")
+);
 let sb = null;
 
 try {
