@@ -390,22 +390,18 @@ async function cancelOcc({ id }) {
     return;
   }
   assertSb();
+  if (!confirm("Tem certeza que deseja CANCELAR esta ocorrência?")) return;
+const { data, error } = await sb
+  .from("ocorrencias")
+  .update({ status: STATUS.CANCELADA })   // 🔥 aqui está o novo padrão
+  .eq("id", id)
+  .select()
+  .single();
 
-  const patch = {
-    cancelada: true,
-    cancelada_por: __user?.id || null,
-    cancelada_em: new Date().toISOString()
-  };
+ if (error) throw error;
 
-  const { data, error } = await sb
-    .from("ocorrencias")
-    .update(patch)
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+location.reload(); // recarrega pra refletir o status
+return data;
 }
 
 // =============================
