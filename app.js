@@ -3,7 +3,7 @@ let geoLayer;
 let farms = new Map(); // farmCode -> {name, features[]}
 let prod2025 = {};
 let farmLabelMarker = null;
-
+let __occTab = "pendentes";
 // =============================
 // SUPABASE CONFIG
 // =============================
