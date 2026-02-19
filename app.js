@@ -534,7 +534,10 @@ async function renderTalhaoCard(feature) {
       <span class="pill"><b>Perfil</b> ${getProfileLabel()}</span>
       <a class="pill" href="./dashboard.html">📊 Dashboard</a>
     </div>
-
+<div class="tabs" style="display:flex; gap:8px; margin:10px 0;">
+  <button id="tabPendentes" class="tab active" onclick="window.__setOccTab('pendentes')">Pendentes</button>
+  <button id="tabCanceladas" class="tab" onclick="window.__setOccTab('canceladas')">Canceladas</button>
+</div>
     <div class="grid">
       <div><div class="k">Área (ha)</div><div class="v">${formatNum(areaHa, 2)}</div></div>
       <div><div class="k">Cultura / Safra</div><div class="v">Cana / 2025</div></div>
