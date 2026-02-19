@@ -535,8 +535,8 @@ async function renderTalhaoCard(feature) {
       <a class="pill" href="./dashboard.html">📊 Dashboard</a>
     </div>
 <div class="tabs" style="display:flex; gap:8px; margin:10px 0;">
-  <button id="tabPendentes" class="tab active" onclick="window.__setOccTab('pendentes')">Pendentes</button>
-  <button id="tabCanceladas" class="tab" onclick="window.__setOccTab('canceladas')">Canceladas</button>
+<button id="tabPendentes" class="tab ${__occTab === 'pendentes' ? 'active' : ''}" onclick="window.__setOccTab('pendentes')">Pendentes</button>
+ <button id="tabCanceladas" class="tab ${__occTab === 'canceladas' ? 'active' : ''}" onclick="window.__setOccTab('canceladas')">Canceladas</button>
 </div>
     <div class="grid">
       <div><div class="k">Área (ha)</div><div class="v">${formatNum(areaHa, 2)}</div></div>
@@ -639,7 +639,10 @@ async function renderOccList({ farmCode, talhao }) {
   farmCode = normalizeFarmCode(farmCode);
   const rows = OCC_CACHE_BY_FARM.get(farmCode) || [];
 
-let list = rows.filter(o => normStatus(o.status) !== STATUS.CANCELADA);
+let list =
+  __occTab === "canceladas"
+    ? rows.filter(o => normStatus(o.status) === STATUS.CANCELADA)
+    : rows.filter(o => normStatus(o.status) !== STATUS.CANCELADA);
   if (talhao !== null && talhao !== undefined) {
     list = list.filter(o => String(o.talhao || "") === String(talhao || ""));
   }
@@ -773,7 +776,25 @@ window.__cancelOcc = async (id) => {
     console.error(e);
   }
 };
+window.__setOccTab = async (tab) => {
+  __occTab = tab;
 
+  const b1 = document.getElementById("tabPendentes");
+  const b2 = document.getElementById("tabCanceladas");
+
+  if (b1 && b2) {
+    b1.classList.toggle("active", tab === "pendentes");
+    b2.classList.toggle("active", tab === "canceladas");
+  }
+
+  try {
+    const farmCode = currentFarmCode;
+    await fetchOccByFarm(farmCode);
+    await renderOccList({ farmCode, talhao: null });
+  } catch (e) {
+    console.error(e);
+  }
+};
 // =============================
 // FORM: CRIAR OCORRÊNCIA
 // =============================
