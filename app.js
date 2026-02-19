@@ -633,7 +633,7 @@ async function renderOccList({ farmCode, talhao }) {
   farmCode = normalizeFarmCode(farmCode);
   const rows = OCC_CACHE_BY_FARM.get(farmCode) || [];
 
- let list = rows.filter(o => normStatus(o.status) !== STATUS.CANCELADA);
+let list = rows.filter(o => normStatus(o.status) !== STATUS.CANCELADA);
   if (talhao !== null && talhao !== undefined) {
     list = list.filter(o => String(o.talhao || "") === String(talhao || ""));
   }
