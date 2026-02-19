@@ -603,7 +603,19 @@ async function renderFarmCard(farmCode) {
       <span class="pill"><b>Perfil</b> ${getProfileLabel()}</span>
       <a class="pill" href="./dashboard.html">📊 Dashboard</a>
     </div>
+<div class="tabs" style="display:flex; gap:8px; margin:10px 0;">
+  <button id="tabPendentes"
+    class="tab ${__occTab === 'pendentes' ? 'active' : ''}"
+    onclick="window.__setOccTab('pendentes')">
+    Pendentes
+  </button>
 
+  <button id="tabCanceladas"
+    class="tab ${__occTab === 'canceladas' ? 'active' : ''}"
+    onclick="window.__setOccTab('canceladas')">
+    Canceladas
+  </button>
+</div>
     <div class="grid">
       <div><div class="k">Área total (ha)</div><div class="v">${formatNum(totalHa, 2)}</div></div>
       <div><div class="k">Cultura / Safra</div><div class="v">Cana / 2025</div></div>
