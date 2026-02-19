@@ -393,7 +393,10 @@ async function cancelOcc({ id }) {
   if (!confirm("Tem certeza que deseja CANCELAR esta ocorrência?")) return;
 const { data, error } = await sb
   .from("ocorrencias")
-  .update({ status: STATUS.CANCELADA })   // 🔥 aqui está o novo padrão
+  .update({ 
+  status: STATUS.CANCELADA,
+  canceled_at: new Date().toISOString()
+})
   .eq("id", id)
   .select()
   .single();
