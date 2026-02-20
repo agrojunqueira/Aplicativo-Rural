@@ -78,7 +78,9 @@
     .muted{color:#6b7280;font-size:12px}
     .row{display:flex;gap:10px;}
     .row > *{flex:1;}
-
+/* força o select do Modo ocupar a linha toda */
+.row select{ flex: 1; width: 100%; min-width: 0; }
+#modeSelect{ flex: 1; width: 100%; min-width: 0; }
     #map{flex:1;height:100vh; min-height: 0;}
     /* ===== Layout upgrade (safe) ===== */
 .side{
